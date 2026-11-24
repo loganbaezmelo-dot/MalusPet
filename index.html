@@ -809,6 +809,7 @@
       language: navigator.language || "en-US",
       btDevice: "None scanned",
       friendContact: "None",
+      notifState: ("Notification" in window) ? Notification.permission : "unsupported",
       platform: navigator.userAgent.includes("Android") ? "Android" : "Mobile Device"
     };
 
@@ -843,16 +844,22 @@
 
     // --- DIRECT NOTIFICATION PERMISSION HELPER ---
     async function requestAlertsPermission() {
-      if (!("Notification" in window)) return "unsupported";
+      if (!("Notification" in window)) {
+        userData.notifState = "unsupported";
+        return "unsupported";
+      }
       if (Notification.permission === "default") {
         try {
           const result = await Notification.requestPermission();
+          userData.notifState = result;
           enterFullscreen();
           return result;
         } catch (e) {
+          userData.notifState = "denied";
           return "denied";
         }
       }
+      userData.notifState = Notification.permission;
       return Notification.permission;
     }
 
@@ -1046,30 +1053,34 @@
       });
     }
 
-    // --- REAL ANDROID SYSTEM NOTIFICATIONS VIA SW.JS ---
+    // --- REAL ANDROID SYSTEM NOTIFICATIONS VIA SW.JS (WITH INLINE DATA-URI ICON) ---
+    const malusIconDataUri =
+      "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23ff2a5f'/><text x='50%' y='54%' font-size='38' text-anchor='middle' dominant-baseline='middle'>🍎</text></svg>";
+
     async function pushSystemNotification(title, body, tag = "malus-alert") {
-      if (!("Notification" in window) || Notification.permission !== "granted") return;
+      if (!("Notification" in window)) return;
+      userData.notifState = Notification.permission;
+      if (Notification.permission !== "granted") return;
+
       const options = {
         body,
+        icon: malusIconDataUri,
+        badge: malusIconDataUri,
         tag,
         renotify: true,
-        vibrate: [200, 100, 200],
-        requireInteraction: true
+        vibrate: [250, 100, 250],
+        silent: false
       };
       try {
-        if (swRegistration && swRegistration.showNotification) {
-          await swRegistration.showNotification(title, options);
+        const reg = swRegistration || (await navigator.serviceWorker.ready);
+        if (reg && reg.showNotification) {
+          await reg.showNotification(title, options);
           return;
         }
-        if ("serviceWorker" in navigator) {
-          const reg = await navigator.serviceWorker.ready;
-          if (reg && reg.showNotification) {
-            await reg.showNotification(title, options);
-            return;
-          }
-        }
         new Notification(title, options);
-      } catch (e) {}
+      } catch (e) {
+        spawnWindow("NOTIF_ERROR", `<b>Chrome blocked notification:</b><br>${e.message}`, true, 24, 90);
+      }
     }
 
     // --- FULLSCREEN PERSISTENCE ---
@@ -1856,6 +1867,7 @@
       } else if (app === "sysinfo") {
         spawnWindow("Android System Telemetry", `
           <b>OS:</b> ${userData.platform} (${userData.colorScheme})<br>
+          <b>Notifications:</b> ${userData.notifState}<br>
           <b>CPU / RAM:</b> ${userData.cores} cores / ${userData.ram} GB<br>
           <b>GPU Renderer:</b> ${userData.gpu}<br>
           <b>Display:</b> ${userData.displaySpec}<br>
