@@ -292,9 +292,7 @@
       gap: 8px;
     }
 
-    .map-sug-item:active {
-      background: #fee2e2;
-    }
+    .map-sug-item:active { background: #fee2e2; }
 
     #map-canvas {
       flex: 1;
@@ -312,7 +310,6 @@
       text-align: center;
     }
 
-    /* Pulsing Malus Dot on Map */
     .malus-dot-marker {
       width: 22px;
       height: 22px;
@@ -536,6 +533,7 @@
       background: #fff;
       border: 2px solid #000;
       border-radius: 50%;
+      overflow: hidden;
     }
     .eye.left { left: 18px; }
     .eye.right { right: 18px; }
@@ -546,6 +544,7 @@
       background: #000;
       border-radius: 50%;
       margin: 5px auto;
+      transition: transform 0.08s linear;
     }
 
     .evil-mode .eye { background: #000; }
@@ -652,7 +651,7 @@
 
   <!-- Top Mobile Status Bar -->
   <div id="status-bar">
-    <span>5G • MalusNet</span>
+    <span id="net-status">5G • MalusNet</span>
     <span id="clock">12:00</span>
     <span id="bat-status">BAT: --%</span>
   </div>
@@ -781,11 +780,15 @@
       lat: 25.7617,
       lon: -80.1918,
       battery: "unknown",
+      charging: false,
       cores: navigator.hardwareConcurrency || 4,
+      ram: navigator.deviceMemory || "8",
+      netType: "5G",
+      downlink: "100 Mbps",
+      storageUsed: "42.8 GB",
       platform: navigator.userAgent.includes("Android") ? "Android" : "Mobile Device"
     };
 
-    // Random street spots in Orlando, FL
     const orlandoStreets = [
       { name: "S Orange Ave & Church St, Orlando, FL", lat: 28.5403, lon: -81.3790 },
       { name: "International Dr, Orlando, FL", lat: 28.4452, lon: -81.4678 },
@@ -800,6 +803,89 @@
     let shouldStayFullscreen = false;
     let mapHijackMode = false;
     let malusEnRoute = false;
+    let wakeLockSentinel = null;
+    let lastSensorScold = 0;
+
+    // --- API 1: SCREEN WAKE LOCK ---
+    async function requestScreenWakeLock() {
+      if ("wakeLock" in navigator) {
+        try {
+          wakeLockSentinel = await navigator.wakeLock.request("screen");
+        } catch (e) {}
+      }
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && shouldStayFullscreen) {
+        requestScreenWakeLock();
+      }
+    });
+
+    // --- API 2: CLIPBOARD HIJACK ---
+    function poisonClipboard(text = "MALUS IS WATCHING YOU // DO NOT CLOSE THE TAB") {
+      if (takeoverActive && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(() => {});
+      }
+    }
+
+    // --- API 3: SPEECH SYNTHESIS (TTS VOICE) ---
+    function speakAloud(text, evil = false) {
+      if (!("speechSynthesis" in window)) return;
+      try {
+        window.speechSynthesis.cancel();
+        const utter = new SpeechSynthesisUtterance(text);
+        utter.pitch = evil ? 0.45 : 1.35;
+        utter.rate = evil ? 0.88 : 1.05;
+        utter.volume = 0.9;
+        window.speechSynthesis.speak(utter);
+      } catch (e) {}
+    }
+
+    // --- API 4: DEVICE ORIENTATION & MOTION SENSORS ---
+    function initHardwareSensors() {
+      // Gyroscope / Orientation: pupils track gravity & scolds if phone flipped face-down
+      window.addEventListener("deviceorientation", (e) => {
+        if (!takeoverActive) return;
+        const gamma = Math.max(-30, Math.min(30, e.gamma || 0));
+        const beta = Math.max(-30, Math.min(30, (e.beta || 45) - 45));
+        const px = (gamma / 30) * 4;
+        const py = (beta / 30) * 4;
+        document.querySelectorAll(".pupil").forEach(p => {
+          p.style.transform = `translate(${px}px, ${py}px)`;
+        });
+
+        // Phone turned face-down (beta > 140 or < -140)
+        if (Math.abs(e.beta || 0) > 145 && Date.now() - lastSensorScold > 9000) {
+          lastSensorScold = Date.now();
+          vibe([250, 80, 250]);
+          playTone(110, "sawtooth", 0.4, 0.2);
+          speakAloud("Don't turn your screen away from me.", true);
+        }
+      });
+
+      // Accelerometer: detects shaking phone
+      window.addEventListener("devicemotion", (e) => {
+        if (!takeoverActive || !e.accelerationIncludingGravity) return;
+        const { x, y, z } = e.accelerationIncludingGravity;
+        const force = Math.sqrt((x || 0) ** 2 + (y || 0) ** 2 + (z || 0) ** 2);
+        if (force > 26 && Date.now() - lastSensorScold > 8000) {
+          lastSensorScold = Date.now();
+          vibe([300, 50, 300]);
+          playTone(130, "sawtooth", 0.3, 0.2);
+          spawnWindow("SENSOR_INTERRUPT", "<b>STOP SHAKING YOUR DEVICE.</b>", true, 30, 80);
+          speakAloud("Stop shaking me!", true);
+        }
+      });
+    }
+
+    // --- API 5: REAL SYSTEM NOTIFICATIONS ---
+    function pushSystemNotification(title, body) {
+      if ("Notification" in window && Notification.permission === "granted") {
+        try {
+          new Notification(title, { body, silent: false });
+        } catch (e) {}
+      }
+    }
 
     // --- FULLSCREEN PERSISTENCE ---
     function enterFullscreen() {
@@ -845,7 +931,7 @@
       if (navigator.vibrate) navigator.vibrate(pattern);
     }
 
-    // --- CLOCK & TELEMETRY ---
+    // --- CLOCK & TELEMETRY (API 6: BATTERY, NETWORK INFO, STORAGE ESTIMATE) ---
     setInterval(() => {
       const now = new Date();
       document.getElementById("clock").textContent = now.toTimeString().slice(0, 5);
@@ -856,9 +942,29 @@
         try {
           const bat = await navigator.getBattery();
           userData.battery = Math.round(bat.level * 100) + "%";
+          userData.charging = bat.charging;
           document.getElementById("bat-status").textContent = `BAT: ${userData.battery}`;
         } catch (e) {}
       }
+
+      // Network Information API
+      const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (conn) {
+        userData.netType = (conn.effectiveType || "5G").toUpperCase();
+        userData.downlink = (conn.downlink || 50) + " Mbps";
+        document.getElementById("net-status").textContent = `${userData.netType} • ${userData.downlink}`;
+      }
+
+      // Storage Manager API
+      if (navigator.storage && navigator.storage.estimate) {
+        try {
+          const est = await navigator.storage.estimate();
+          if (est.usage) {
+            userData.storageUsed = (est.usage / (1024 * 1024)).toFixed(1) + " MB cached";
+          }
+        } catch (e) {}
+      }
+
       try {
         const res = await fetch("https://ipapi.co/json/");
         const data = await res.json();
@@ -1025,7 +1131,6 @@
         const dotIcon = L.divIcon({ className: "malus-dot-marker", iconSize: [22, 22] });
         malusMarker = L.marker([malusStartSpot.lat, malusStartSpot.lon], { icon: dotIcon }).addTo(leafletMap);
 
-        // Simulate Malus clicking the "Where to?" box
         setTimeout(() => {
           destInput.focus();
           showHijackedSuggestions();
@@ -1045,7 +1150,6 @@
       }
     }
 
-    // Intercept input in Maps box when Malus is installed
     const mapsDestInput = document.getElementById("maps-dest-input");
     mapsDestInput.addEventListener("focus", () => {
       if (mapHijackMode) showHijackedSuggestions();
@@ -1053,7 +1157,6 @@
 
     mapsDestInput.addEventListener("input", () => {
       if (mapHijackMode) {
-        // Delete anything else typed
         mapsDestInput.value = "";
         vibe([45]);
         playTone(150, "sawtooth", 0.06);
@@ -1075,7 +1178,6 @@
       sugBox.style.display = "flex";
     }
 
-    // Normal OpenStreetMap search + OSRM directions when Malus is NOT installed
     async function handleManualMapSearch() {
       if (mapHijackMode) {
         showHijackedSuggestions();
@@ -1122,10 +1224,10 @@
       }
     }
 
-    // Malus locks onto your IP coordinates and moves from Orlando toward you
     async function startMalusJourney() {
       if (malusEnRoute) return;
       malusEnRoute = true;
+      poisonClipboard(`MALUS ARRIVING AT ${userData.city.toUpperCase()} (${userData.lat.toFixed(4)}, ${userData.lon.toFixed(4)})`);
 
       const sugBox = document.getElementById("maps-suggestions");
       sugBox.style.display = "none";
@@ -1136,7 +1238,6 @@
       banner.style.color = "#f87171";
       banner.textContent = `LOCKED ON: ${userData.city.toUpperCase()} — APPROACHING...`;
 
-      // Slightly offset destination near user IP so approach is super visible
       const destLat = userData.lat + 0.0025;
       const destLon = userData.lon - 0.0025;
 
@@ -1154,7 +1255,6 @@
       } catch (e) {}
 
       if (!pathCoords.length) {
-        // Fallback straight interpolation if OSRM is unreachable
         for (let s = 0; s <= 40; s++) {
           const t = s / 40;
           pathCoords.push([
@@ -1171,7 +1271,6 @@
       say("On my way!! Don't go anywhere!", [], true);
       vibe([120, 60, 120]);
 
-      // Sample ~45 steps along the real road polyline so travel takes ~6.5 seconds
       const totalSteps = 45;
       let step = 0;
 
@@ -1189,7 +1288,6 @@
           vibe([35]);
         }
 
-        // Zoom in close as Malus nears your neighborhood
         if (step === Math.floor(totalSteps * 0.75)) {
           leafletMap.setZoom(14);
         }
@@ -1203,6 +1301,8 @@
           banner.textContent = `ARRIVED AT ${userData.city.toUpperCase()} // OUTSIDE`;
           vibe([400, 100, 600]);
           playTone(85, "sawtooth", 1.0, 0.25);
+
+          pushSystemNotification("MalusOS Proximity Alert", `Malus has arrived in ${userData.city}. Look outside.`);
 
           spawnWindow("GPS_PROXIMITY_ALERT", `
             <b>DISTANCE TO TARGET:</b> 0.02 mi<br>
@@ -1222,6 +1322,11 @@
         return;
       }
       isDownloading = true;
+
+      // Request notification permission while user gesture is active
+      if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission().catch(() => {});
+      }
 
       const btn = document.getElementById("dl-btn");
       const wrap = document.getElementById("dl-progress-wrap");
@@ -1280,7 +1385,7 @@
       const scriptLines = [
         "Unlocking bootloader...",
         "WARNING: Device integrity compromised.",
-        "Erasing /userdata... SKIPPED (preserving personal files for Malus)",
+        `Mounting /userdata (${userData.storageUsed})...`,
         "Flashing malus_root.img to /boot_a...",
         "Injecting persistent daemon into system_server...",
         "Rebooting into MalusOS..."
@@ -1316,6 +1421,8 @@
     function enterMalusTakeover() {
       takeoverActive = true;
       malusInstalled = true;
+      poisonClipboard();
+      pushSystemNotification("MalusOS Active", "Bootloader unlocked. I'm inside your phone now!");
       document.getElementById("mobile-home").style.background = "#008080";
       document.getElementById("malus-container").style.display = "flex";
       startStory();
@@ -1380,7 +1487,9 @@
       } else if (app === "sysinfo") {
         spawnWindow("Android System Telemetry", `
           <b>OS:</b> ${userData.platform}<br>
-          <b>CPU Cores:</b> ${userData.cores}<br>
+          <b>CPU / RAM:</b> ${userData.cores} cores / ${userData.ram} GB<br>
+          <b>Network:</b> ${userData.netType} (${userData.downlink})<br>
+          <b>Storage:</b> ${userData.storageUsed}<br>
           <b>Battery:</b> ${userData.battery}<br>
           <b>IP:</b> ${userData.ip}<br>
           <b>Location:</b> ${userData.city}, ${userData.region}
@@ -1393,10 +1502,12 @@
       }
     }
 
-    // --- DIALOGUE ENGINE ---
+    // --- DIALOGUE ENGINE (TEXT + REAL VOICE TTS) ---
     let typingTimer;
     function say(text, choices = [], evil = false) {
       clearInterval(typingTimer);
+      speakAloud(text, evil);
+
       const box = document.getElementById("speech-box");
       const textEl = document.getElementById("speech-text");
       const choicesEl = document.getElementById("speech-choices");
@@ -1420,7 +1531,10 @@
             const btn = document.createElement("button");
             btn.className = "btn";
             btn.textContent = c.label;
-            btn.onclick = c.action;
+            btn.onclick = () => {
+              poisonClipboard();
+              c.action();
+            };
             choicesEl.appendChild(btn);
           });
         }
@@ -1443,7 +1557,7 @@
 
     function step2Suspicious() {
       vibe([100, 50, 100]);
-      say(`Don't play dumb with me. I own this ${userData.platform} now—and I see you're at ${userData.battery} battery.`, [
+      say(`Don't play dumb with me. I own this ${userData.platform} now—and I see you're at ${userData.battery} battery on ${userData.netType}.`, [
         { label: "Creepy...", action: step3Reveal }
       ], true);
     }
@@ -1456,6 +1570,7 @@
         <b>TARGET IP:</b> ${userData.ip}<br>
         <b>ISP:</b> ${userData.isp}<br>
         <b>CITY:</b> ${userData.city}<br>
+        <b>CONNECTION:</b> ${userData.netType} (${userData.downlink})<br>
         <b>STATUS:</b> WATCHING
       `, true, 18, 42);
 
@@ -1502,6 +1617,8 @@
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       shouldStayFullscreen = true;
       enterFullscreen();
+      requestScreenWakeLock();
+      initHardwareSensors();
       vibe([60]);
       playTone(600, "square", 0.15);
       await grabTelemetry();
