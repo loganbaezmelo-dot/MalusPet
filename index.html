@@ -787,6 +787,10 @@
       netType: "5G",
       downlink: "100 Mbps",
       storageUsed: "42.8 GB",
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York",
+      language: navigator.language || "en-US",
+      btDevice: "None scanned",
+      friendContact: "None",
       platform: navigator.userAgent.includes("Android") ? "Android" : "Mobile Device"
     };
 
@@ -807,7 +811,7 @@
     let wakeLockSentinel = null;
     let lastSensorScold = 0;
 
-    // --- SERVICE WORKER REGISTRATION (REQUIRED FOR ANDROID SYSTEM NOTIFICATIONS) ---
+    // --- SERVICE WORKER REGISTRATION ---
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("./sw.js").catch(() => {});
     }
@@ -825,6 +829,15 @@
       if (document.visibilityState === "visible" && shouldStayFullscreen) {
         requestScreenWakeLock();
       }
+    });
+
+    // --- GAMEPAD API DETECTION ---
+    window.addEventListener("gamepadconnected", (e) => {
+      if (!takeoverActive) return;
+      const padName = e.gamepad.id.split("(")[0].trim() || "Controller";
+      vibe([200, 80, 200]);
+      spawnWindow("HID_INPUT_DETECTED", `<b>EXTERNAL CONTROLLER:</b><br>${padName}<br><br><i>Buttons won't save you.</i>`, true, 24, 90);
+      speakAloud("I see your controller connected. It won't help you.", true);
     });
 
     // --- SPEECH SYNTHESIS (TTS VOICE) ---
@@ -1314,11 +1327,28 @@
             <b>DISTANCE TO TARGET:</b> 0.02 mi<br>
             <b>COORDINATES:</b> ${pos[0].toFixed(4)}, ${pos[1].toFixed(4)}<br>
             <b>STATUS:</b> <span style="color:#b91c1c;font-weight:bold;">I AM HERE.</span>
-          `, true, 22, 145);
+          `, true, 22, 130);
 
-          say(`I'm here in ${userData.city}. Look outside your window.`, [], true);
+          say(`I'm here in ${userData.city}. Look outside your window.`, [
+            { label: "Call for Help", action: triggerWebShareEscape }
+          ], true);
         }
       }, 145);
+    }
+
+    // --- WEB SHARE API FINALE ---
+    async function triggerWebShareEscape() {
+      vibe([200, 50, 200]);
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: "MalusOS Emergency",
+            text: `HELP ME — MalusPet unlocked my bootloader and found me in ${userData.city}.`
+          });
+        } catch (e) {}
+      }
+      enterFullscreen();
+      say("Did you really think anyone would believe you?", [], true);
     }
 
     // --- DOWNLOAD -> CRASH -> TERMINAL -> BLACKOUT -> MALUS ---
@@ -1494,6 +1524,8 @@
           <b>CPU / RAM:</b> ${userData.cores} cores / ${userData.ram} GB<br>
           <b>Network:</b> ${userData.netType} (${userData.downlink})<br>
           <b>Storage:</b> ${userData.storageUsed}<br>
+          <b>Timezone:</b> ${userData.timezone}<br>
+          <b>Bluetooth:</b> ${userData.btDevice}<br>
           <b>Battery:</b> ${userData.battery}<br>
           <b>IP:</b> ${userData.ip}<br>
           <b>Location:</b> ${userData.city}, ${userData.region}
@@ -1571,13 +1603,51 @@
         <b>TARGET IP:</b> ${userData.ip}<br>
         <b>ISP:</b> ${userData.isp}<br>
         <b>CITY:</b> ${userData.city}<br>
-        <b>CONNECTION:</b> ${userData.netType} (${userData.downlink})<br>
+        <b>TIMEZONE:</b> ${userData.timezone}<br>
         <b>STATUS:</b> WATCHING
       `, true, 18, 42);
 
+      // Step 3A: Contact Picker API (Android Chrome native)
+      if ("contacts" in navigator && "ContactsManager" in window) {
+        say("If we're best friends, introduce me to your other friends! Pick someone from your contacts so I can say hi!", [
+          { label: "Pick Contact", action: triggerContactPicker },
+          { label: "No", action: step3ClipboardPrompt }
+        ], true);
+      } else {
+        step3ClipboardPrompt();
+      }
+    }
+
+    async function triggerContactPicker() {
+      try {
+        const contacts = await navigator.contacts.select(["name", "tel"], { multiple: false });
+        enterFullscreen();
+        if (contacts && contacts.length > 0) {
+          const cName = (contacts[0].name && contacts[0].name[0]) || "Unknown";
+          const cTel = (contacts[0].tel && contacts[0].tel[0]) || "Hidden Number";
+          userData.friendContact = cName;
+
+          spawnWindow("CONTACTS_LEAK.DB", `
+            <b>TARGET FRIEND:</b> ${cName}<br>
+            <b>PHONE:</b> ${cTel}<br>
+            <i>Added to Malus's list.</i>
+          `, true, 26, 110);
+          vibe([180, 60, 180]);
+          say(`Ooh, ${cName}! I'll remember them. Now let's check what else you're hiding...`, [
+            { label: "Continue", action: step3ClipboardPrompt }
+          ], true);
+          return;
+        }
+      } catch (e) {
+        enterFullscreen();
+      }
+      step3ClipboardPrompt();
+    }
+
+    function step3ClipboardPrompt() {
       say("Best friends don't keep secrets! Let me see what you've been copying on your keyboard lately... I promise I won't leak it!", [
         { label: "Let Malus Peek", action: triggerClipboardPeek },
-        { label: "No way", action: skipClipboardToCamera }
+        { label: "No way", action: step3BluetoothPrompt }
       ], true);
     }
 
@@ -1606,18 +1676,46 @@
       `, true, 24, 155);
 
       vibe([120, 60, 120]);
-      const reaction = grabbedText.trim()
-        ? "Ooh, interesting stuff on your keyboard... don't worry, I won't leak it! Now let me SEE your face!"
-        : "Nothing copied? Clearing your tracks already? Now let me SEE your face!";
-
-      say(reaction, [
-        { label: "Let Malus See", action: triggerCameraScare },
-        { label: "Refuse", action: triggerRefusalSpam }
-      ], true);
+      step3BluetoothPrompt();
     }
 
-    function skipClipboardToCamera() {
-      say("Hiding your keyboard from me? Fine. Let me SEE your face instead! Tap Allow!", [
+    // Step 3B: Web Bluetooth Room Radar
+    function step3BluetoothPrompt() {
+      if (navigator.bluetooth) {
+        say("Are you alone in that room right now? Let me scan your Bluetooth radio to see what's next to you!", [
+          { label: "Scan Room", action: triggerBluetoothScan },
+          { label: "Skip", action: askCameraStep }
+        ], true);
+      } else {
+        askCameraStep();
+      }
+    }
+
+    async function triggerBluetoothScan() {
+      try {
+        const device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true });
+        enterFullscreen();
+        const devName = device.name || `Unnamed BLE (${device.id.slice(0, 8)})`;
+        userData.btDevice = devName;
+
+        spawnWindow("BLE_PROXIMITY_RADAR", `
+          <b>NEARBY HARDWARE DETECTED:</b><br>
+          <span style="color:#b91c1c; font-weight:bold;">${devName}</span><br>
+          <i>Signal: Strong (In same room)</i>
+        `, true, 22, 135);
+        vibe([150, 50, 150]);
+        say(`I see "${devName}" right next to you. Now let me SEE you with your camera!`, [
+          { label: "Let Malus See", action: triggerCameraScare },
+          { label: "Refuse", action: triggerRefusalSpam }
+        ], true);
+      } catch (e) {
+        enterFullscreen();
+        askCameraStep();
+      }
+    }
+
+    function askCameraStep() {
+      say("I know where you are. Now let me SEE you. Tap Allow so I can look at my best friend!", [
         { label: "Let Malus See", action: triggerCameraScare },
         { label: "Refuse", action: triggerRefusalSpam }
       ], true);
