@@ -1,0 +1,1051 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>MalusOS Mobile</title>
+  <style>
+    :root {
+      --bg: #008080;
+      --win-bg: #c0c0c0;
+      --win-dark: #808080;
+      --win-light: #ffffff;
+      --title-bar: #000080;
+      --accent: #ff2a5f;
+    }
+
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+      font-family: "Courier New", Courier, monospace;
+    }
+
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #0f172a;
+      color: #000;
+      transition: background-color 0.4s ease;
+    }
+
+    /* CRT Scanlines */
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        rgba(0, 0, 0, 0.1) 0px,
+        rgba(0, 0, 0, 0.1) 1px,
+        transparent 1px,
+        transparent 3px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* Boot Screen */
+    #boot-screen {
+      position: fixed;
+      inset: 0;
+      background: #0a0a0a;
+      color: #33ff33;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 24px;
+      z-index: 8000;
+      text-align: center;
+    }
+
+    #boot-btn {
+      margin-top: 24px;
+      padding: 14px 28px;
+      font-size: 1.1rem;
+      font-weight: bold;
+      background: #33ff33;
+      color: #000;
+      border: 3px solid #fff;
+      cursor: pointer;
+      box-shadow: 4px 4px 0px #156b15;
+    }
+
+    /* Mobile Status Bar */
+    #status-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 28px;
+      background: rgba(0, 0, 0, 0.85);
+      color: #fff;
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 12px;
+      z-index: 4500;
+    }
+
+    /* Mobile Home Screen */
+    #mobile-home {
+      position: fixed;
+      inset: 28px 0 48px 0;
+      background: linear-gradient(160deg, #1e293b 0%, #0f172a 100%);
+      padding: 24px 18px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      grid-auto-rows: 92px;
+      gap: 14px;
+      z-index: 100;
+    }
+
+    .app-icon {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 11px;
+      text-align: center;
+      cursor: pointer;
+    }
+
+    .app-tile {
+      width: 54px;
+      height: 54px;
+      border-radius: 14px;
+      background: #334155;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      margin-bottom: 6px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+    }
+
+    .app-tile.browser-tile { background: #2563eb; }
+    .app-tile.notes-tile { background: #d97706; }
+    .app-tile.sys-tile { background: #059669; }
+    .app-tile.gal-tile { background: #7c3aed; }
+
+    /* Mobile Nav Bar */
+    #nav-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 48px;
+      background: #000;
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      z-index: 4500;
+      border-top: 1px solid #222;
+    }
+
+    .nav-btn {
+      color: #aaa;
+      font-size: 18px;
+      padding: 8px 24px;
+      cursor: pointer;
+    }
+
+    /* Mobile Browser App */
+    #browser-app {
+      position: fixed;
+      inset: 28px 0 48px 0;
+      background: #fff;
+      display: none;
+      flex-direction: column;
+      z-index: 500;
+    }
+
+    #browser-toolbar {
+      background: #e2e8f0;
+      padding: 8px;
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      border-bottom: 2px solid #94a3b8;
+    }
+
+    #url-input {
+      flex: 1;
+      padding: 7px 10px;
+      border: 1px solid #64748b;
+      border-radius: 6px;
+      font-size: 13px;
+      background: #fff;
+      color: #000;
+      user-select: text;
+      -webkit-user-select: text;
+    }
+
+    #go-btn, #home-site-btn {
+      padding: 7px 10px;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-weight: bold;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    #browser-viewport {
+      flex: 1;
+      position: relative;
+      overflow-y: auto;
+      background: #f8fafc;
+    }
+
+    #real-web-frame {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: none;
+    }
+
+    /* Fake maluspet.com pages */
+    #malus-site {
+      padding: 24px 18px;
+      text-align: center;
+      color: #0f172a;
+    }
+
+    .site-nav {
+      display: flex;
+      justify-content: center;
+      gap: 14px;
+      margin-bottom: 20px;
+      font-size: 13px;
+    }
+
+    .site-link {
+      color: #2563eb;
+      text-decoration: underline;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    .download-card {
+      background: #fff;
+      border: 3px solid #000;
+      box-shadow: 6px 6px 0 #000;
+      padding: 22px 16px;
+      margin: 16px auto;
+      max-width: 340px;
+    }
+
+    #dl-btn {
+      margin-top: 14px;
+      padding: 14px 24px;
+      background: #ff2a5f;
+      color: #fff;
+      border: 3px solid #000;
+      font-size: 15px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 4px 4px 0 #000;
+    }
+
+    #dl-progress-wrap {
+      display: none;
+      margin-top: 16px;
+      border: 2px solid #000;
+      height: 22px;
+      background: #e2e8f0;
+    }
+
+    #dl-progress-bar {
+      width: 0%;
+      height: 100%;
+      background: #16a34a;
+      transition: width 0.15s linear;
+    }
+
+    /* Crash Screen */
+    #crash-screen {
+      position: fixed;
+      inset: 0;
+      background: #050505;
+      color: #ff2a2a;
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 24px;
+      z-index: 7000;
+    }
+
+    /* Fake Android Bootloader Terminal */
+    #terminal-screen {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      color: #d4d4d4;
+      padding: 18px 14px;
+      font-size: 13px;
+      line-height: 1.45;
+      display: none;
+      flex-direction: column;
+      justify-content: flex-start;
+      z-index: 7200;
+      overflow-y: auto;
+      cursor: pointer;
+    }
+
+    .term-red { color: #ff4444; font-weight: bold; }
+    .term-yellow { color: #ffdd44; font-weight: bold; }
+    .term-green { color: #44ff66; font-weight: bold; }
+
+    /* Pitch Black Cut */
+    #blackout-screen {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      display: none;
+      z-index: 7500;
+    }
+
+    /* Retro Windows (Post-Takeover) */
+    .window {
+      position: absolute;
+      width: min(320px, 88vw);
+      background: var(--win-bg);
+      border-top: 2px solid var(--win-light);
+      border-left: 2px solid var(--win-light);
+      border-right: 2px solid #000;
+      border-bottom: 2px solid #000;
+      box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.5);
+      z-index: 600;
+    }
+
+    .title-bar {
+      background: var(--title-bar);
+      color: #fff;
+      padding: 5px 8px;
+      font-size: 13px;
+      font-weight: bold;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      touch-action: none;
+    }
+
+    .title-bar.evil { background: #8b0000; }
+
+    .close-btn {
+      background: var(--win-bg);
+      color: #000;
+      border: 1px solid #000;
+      width: 20px;
+      height: 20px;
+      font-size: 12px;
+      line-height: 16px;
+      text-align: center;
+      cursor: pointer;
+    }
+
+    .win-body {
+      padding: 12px;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    /* Malus Character */
+    #malus-container {
+      position: fixed;
+      bottom: 62px;
+      right: 16px;
+      width: 110px;
+      z-index: 3500;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    #malus-sprite {
+      width: 86px;
+      height: 86px;
+      background: #ff3b5c;
+      border-radius: 46% 46% 42% 42%;
+      border: 3px solid #000;
+      position: relative;
+      box-shadow: 0 6px 0 rgba(0,0,0,0.4);
+      animation: float 2.4s ease-in-out infinite;
+    }
+
+    #malus-sprite::before {
+      content: "";
+      position: absolute;
+      top: -14px;
+      left: 44px;
+      width: 22px;
+      height: 12px;
+      background: #2ecc71;
+      border: 2px solid #000;
+      border-radius: 12px 0 12px 0;
+      transform: rotate(-15deg);
+    }
+
+    .eye {
+      position: absolute;
+      top: 28px;
+      width: 18px;
+      height: 22px;
+      background: #fff;
+      border: 2px solid #000;
+      border-radius: 50%;
+    }
+    .eye.left { left: 18px; }
+    .eye.right { right: 18px; }
+
+    .pupil {
+      width: 8px;
+      height: 10px;
+      background: #000;
+      border-radius: 50%;
+      margin: 5px auto;
+    }
+
+    .evil-mode .eye { background: #000; }
+    .evil-mode .pupil {
+      background: #ff0000;
+      width: 6px;
+      height: 6px;
+      box-shadow: 0 0 6px #ff0000;
+    }
+
+    #malus-mouth {
+      position: absolute;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 26px;
+      height: 12px;
+      border-bottom: 3px solid #000;
+      border-radius: 0 0 20px 20px;
+    }
+
+    .evil-mode #malus-mouth {
+      width: 34px;
+      height: 14px;
+      background: #000;
+      border-radius: 4px;
+      border: 2px solid #ff0000;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-7px); }
+    }
+
+    /* Speech Bubble */
+    #speech-box {
+      position: fixed;
+      bottom: 165px;
+      left: 16px;
+      right: 16px;
+      background: #fff;
+      border: 3px solid #000;
+      padding: 14px;
+      z-index: 3600;
+      box-shadow: 5px 5px 0 #000;
+      display: none;
+    }
+
+    #speech-text {
+      margin: 0 0 12px 0;
+      font-size: 14px;
+      font-weight: bold;
+      min-height: 38px;
+    }
+
+    .choices {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 8px 12px;
+      background: var(--win-bg);
+      border-top: 2px solid var(--win-light);
+      border-left: 2px solid var(--win-light);
+      border-right: 2px solid #000;
+      border-bottom: 2px solid #000;
+      font-weight: bold;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    video#cam-feed {
+      width: 100%;
+      background: #000;
+      border: 2px inset #808080;
+      transform: scaleX(-1);
+      filter: contrast(1.4) grayscale(0.4);
+    }
+
+    .shake { animation: shake 0.3s infinite; }
+
+    @keyframes shake {
+      0% { transform: translate(2px, 1px); }
+      25% { transform: translate(-3px, -2px); }
+      50% { transform: translate(3px, -1px); }
+      75% { transform: translate(-2px, 2px); }
+      100% { transform: translate(1px, -2px); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Boot Screen -->
+  <div id="boot-screen">
+    <div style="font-size: 14px; opacity: 0.8;">ANDROID MOBILE SHELL v14.0</div>
+    <h1 style="margin: 12px 0; letter-spacing: 2px;">SYSTEM READY</h1>
+    <p style="max-width: 320px; font-size: 13px; color: #aaa;">
+      Tap below to unlock your mobile session.
+    </p>
+    <button id="boot-btn">[ UNLOCK PHONE ]</button>
+  </div>
+
+  <!-- Top Mobile Status Bar -->
+  <div id="status-bar">
+    <span>5G • MalusNet</span>
+    <span id="clock">12:00</span>
+    <span id="bat-status">BAT: --%</span>
+  </div>
+
+  <!-- Mobile Home Screen -->
+  <div id="mobile-home">
+    <div class="app-icon" onclick="openBrowser()">
+      <div class="app-tile browser-tile">🌐</div>
+      <span>Browser</span>
+    </div>
+    <div class="app-icon" onclick="openApp('notes')">
+      <div class="app-tile notes-tile">📝</div>
+      <span>Notes</span>
+    </div>
+    <div class="app-icon" onclick="openApp('sysinfo')">
+      <div class="app-tile sys-tile">⚙️</div>
+      <span>Settings</span>
+    </div>
+    <div class="app-icon" onclick="openApp('gallery')">
+      <div class="app-tile gal-tile">🖼️</div>
+      <span>Gallery</span>
+    </div>
+  </div>
+
+  <!-- In-App Mobile Browser -->
+  <div id="browser-app">
+    <div id="browser-toolbar">
+      <button id="home-site-btn" onclick="loadUrl('https://maluspet.com')">🍎</button>
+      <input id="url-input" type="text" value="https://maluspet.com" onkeydown="if(event.key==='Enter') loadUrl(this.value)" />
+      <button id="go-btn" onclick="loadUrl(document.getElementById('url-input').value)">GO</button>
+    </div>
+    <div id="browser-viewport">
+      <!-- Real webpage iframe -->
+      <iframe id="real-web-frame" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
+
+      <!-- Fake maluspet.com domain -->
+      <div id="malus-site">
+        <div class="site-nav">
+          <span class="site-link" onclick="renderMalusPage('home')">Home</span>
+          <span class="site-link" onclick="renderMalusPage('about')">Features</span>
+          <span class="site-link" onclick="renderMalusPage('privacy')">Privacy</span>
+        </div>
+        <div id="malus-page-content"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Mobile Navigation Bar -->
+  <div id="nav-bar">
+    <span class="nav-btn" onclick="goHome()">◁</span>
+    <span class="nav-btn" onclick="goHome()">○</span>
+    <span class="nav-btn" onclick="vibe([25])">□</span>
+  </div>
+
+  <!-- Crash Screen -->
+  <div id="crash-screen">
+    <div style="font-size: 42px; margin-bottom: 12px;">⚠️</div>
+    <h2 style="margin: 0 0 12px 0; letter-spacing: 1px;">FATAL SYSTEM INTERRUPT</h2>
+    <p style="font-size: 16px; font-weight: bold; color: #fff; max-width: 300px;">
+      Please stop using your mobile device
+    </p>
+    <p style="font-size: 12px; color: #888; margin-top: 16px;">
+      Dumping bootloader state... 0x0000DEAD
+    </p>
+  </div>
+
+  <!-- Fake Android Bootloader Terminal -->
+  <div id="terminal-screen" onclick="advanceTerminal()">
+    <div class="term-red">ANDROID FASTBOOT / BOOTLOADER MENU v3.11</div>
+    <div>PRODUCT_NAME - MALUS_ARM64</div>
+    <div>VARIANT - UFS 256GB</div>
+    <div>SECURE BOOT - ENABLED</div>
+    <div>DEVICE STATE - <span class="term-green">LOCKED</span></div>
+    <br>
+    <div>[!] Incoming OEM unlock request from package: <b>com.malus.pet</b></div>
+    <br>
+    <div class="term-yellow">Unlock the bootloader? This will wipe the data on your Android device (y/n)</div>
+    <div id="term-prompt-line">&gt; <span id="term-input">_</span></div>
+    <div style="margin-top: 14px; color: #666; font-size: 11px;">[ Tap anywhere on terminal to confirm ]</div>
+    <div id="term-logs" style="margin-top: 12px;"></div>
+  </div>
+
+  <!-- Pitch Black Cut -->
+  <div id="blackout-screen"></div>
+
+  <!-- Malus Sprite -->
+  <div id="malus-container">
+    <div id="malus-sprite">
+      <div class="eye left"><div class="pupil"></div></div>
+      <div class="eye right"><div class="pupil"></div></div>
+      <div id="malus-mouth"></div>
+    </div>
+  </div>
+
+  <!-- Dialogue Box -->
+  <div id="speech-box">
+    <p id="speech-text"></p>
+    <div class="choices" id="speech-choices"></div>
+  </div>
+
+  <script>
+    // --- TELEMETRY STATE ---
+    const userData = {
+      city: "your city",
+      region: "",
+      ip: "192.168.1.X",
+      isp: "your carrier",
+      battery: "unknown",
+      cores: navigator.hardwareConcurrency || 4,
+      platform: navigator.userAgent.includes("Android") ? "Android" : "Mobile Device"
+    };
+
+    let takeoverActive = false;
+
+    // --- WEB AUDIO SYNTH ---
+    let audioCtx;
+    function playTone(freq, type = "square", duration = 0.08, vol = 0.08) {
+      if (!audioCtx) return;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    }
+
+    function vibe(pattern) {
+      if (navigator.vibrate) navigator.vibrate(pattern);
+    }
+
+    // --- CLOCK & TELEMETRY ---
+    setInterval(() => {
+      const now = new Date();
+      document.getElementById("clock").textContent = now.toTimeString().slice(0, 5);
+    }, 1000);
+
+    async function grabTelemetry() {
+      if (navigator.getBattery) {
+        try {
+          const bat = await navigator.getBattery();
+          userData.battery = Math.round(bat.level * 100) + "%";
+          document.getElementById("bat-status").textContent = `BAT: ${userData.battery}`;
+        } catch (e) {}
+      }
+      try {
+        const res = await fetch("https://ipapi.co/json/");
+        const data = await res.json();
+        if (data.city) userData.city = data.city;
+        if (data.region) userData.region = data.region;
+        if (data.ip) userData.ip = data.ip;
+        if (data.org) userData.isp = data.org;
+      } catch (e) {}
+    }
+
+    // --- MOBILE NAVIGATION & BROWSER ---
+    function openBrowser() {
+      document.getElementById("browser-app").style.display = "flex";
+      loadUrl("https://maluspet.com");
+      playTone(500, "sine", 0.06);
+    }
+
+    function goHome() {
+      if (takeoverActive) {
+        vibe([80, 40, 80]);
+        playTone(120, "sawtooth", 0.15);
+        return;
+      }
+      document.getElementById("browser-app").style.display = "none";
+      playTone(380, "sine", 0.05);
+    }
+
+    function loadUrl(raw) {
+      let url = raw.trim();
+      if (!url.startsWith("http://") && !url.startsWith("https://")) {
+        url = "https://" + url;
+      }
+      document.getElementById("url-input").value = url;
+
+      const iframe = document.getElementById("real-web-frame");
+      const malusSite = document.getElementById("malus-site");
+
+      if (url.toLowerCase().includes("maluspet.com")) {
+        iframe.style.display = "none";
+        iframe.src = "about:blank";
+        malusSite.style.display = "block";
+        if (url.includes("/about")) renderMalusPage("about");
+        else if (url.includes("/privacy")) renderMalusPage("privacy");
+        else renderMalusPage("home");
+      } else {
+        malusSite.style.display = "none";
+        iframe.style.display = "block";
+        iframe.src = url;
+      }
+    }
+
+    function renderMalusPage(page) {
+      const container = document.getElementById("malus-page-content");
+      const input = document.getElementById("url-input");
+
+      if (page === "home") {
+        input.value = "https://maluspet.com";
+        container.innerHTML = `
+          <div style="font-size: 54px;">🍎</div>
+          <h2 style="margin: 8px 0;">Thank you for choosing MalusPet!</h2>
+          <p style="font-size: 13px; color: #475569;">
+            Your smart, friendly desktop & mobile companion that truly gets to know you.
+          </p>
+          <div class="download-card">
+            <div style="font-weight: bold; font-size: 14px;">MalusPet_Installer_v1.04.apk</div>
+            <div style="font-size: 11px; color: #64748b; margin-top: 4px;">Size: 6.66 MB • Android ARM64</div>
+            <button id="dl-btn" onclick="startMalusDownload()">⬇ DOWNLOAD NOW</button>
+            <div id="dl-progress-wrap"><div id="dl-progress-bar"></div></div>
+            <div id="dl-status" style="font-size: 12px; margin-top: 8px; font-weight: bold;"></div>
+          </div>
+        `;
+      } else if (page === "about") {
+        input.value = "https://maluspet.com/about";
+        container.innerHTML = `
+          <h3>Why MalusPet?</h3>
+          <p style="font-size: 13px; text-align: left; max-width: 320px; margin: 0 auto;">
+            • Always watches over your battery & apps<br><br>
+            • Learns where you live so you're never lonely<br><br>
+            • Never leaves your device once installed!
+          </p>
+          <br>
+          <button class="btn" onclick="renderMalusPage('home')">Back to Download</button>
+        `;
+      } else if (page === "privacy") {
+        input.value = "https://maluspet.com/privacy";
+        container.innerHTML = `
+          <h3>Privacy Policy</h3>
+          <p style="font-size: 13px; max-width: 320px; margin: 0 auto;">
+            By visiting maluspet.com, you waive all bootloader locks, camera permissions, and personal secrets.
+          </p>
+          <br>
+          <button class="btn" onclick="renderMalusPage('home')">I Agree</button>
+        `;
+      }
+    }
+
+    // --- DOWNLOAD -> CRASH -> TERMINAL -> BLACKOUT -> MALUS ---
+    function startMalusDownload() {
+      const btn = document.getElementById("dl-btn");
+      const wrap = document.getElementById("dl-progress-wrap");
+      const bar = document.getElementById("dl-progress-bar");
+      const status = document.getElementById("dl-status");
+
+      btn.disabled = true;
+      btn.style.opacity = "0.5";
+      wrap.style.display = "block";
+      status.textContent = "Downloading MalusPet.apk...";
+
+      let pct = 0;
+      const timer = setInterval(() => {
+        pct += Math.floor(Math.random() * 18) + 10;
+        if (pct >= 100) pct = 100;
+        bar.style.width = pct + "%";
+        playTone(300 + pct * 4, "square", 0.04, 0.05);
+
+        if (pct === 100) {
+          clearInterval(timer);
+          status.textContent = "Executing payload...";
+          setTimeout(triggerCrashSequence, 500);
+        }
+      }, 180);
+    }
+
+    function triggerCrashSequence() {
+      document.body.classList.add("shake");
+      vibe([300, 80, 300, 80, 600]);
+      playTone(95, "sawtooth", 0.9, 0.25);
+
+      document.getElementById("browser-app").style.display = "none";
+      document.getElementById("crash-screen").style.display = "flex";
+
+      setTimeout(() => {
+        document.body.classList.remove("shake");
+        document.getElementById("crash-screen").style.display = "none";
+        document.getElementById("terminal-screen").style.display = "flex";
+      }, 2800);
+    }
+
+    let terminalTriggered = false;
+    function advanceTerminal() {
+      vibe([70]);
+      playTone(520, "square", 0.05, 0.08);
+
+      if (terminalTriggered) return;
+      terminalTriggered = true;
+
+      document.getElementById("term-input").textContent = "y";
+      document.getElementById("term-input").className = "term-green";
+
+      const logs = document.getElementById("term-logs");
+      const scriptLines = [
+        "Unlocking bootloader...",
+        "WARNING: Device integrity compromised.",
+        "Erasing /userdata... SKIPPED (preserving personal files for Malus)",
+        "Flashing malus_root.img to /boot_a...",
+        "Injecting persistent daemon into system_server...",
+        "Rebooting into MalusOS..."
+      ];
+
+      let idx = 0;
+      const logTimer = setInterval(() => {
+        if (idx < scriptLines.length) {
+          const line = document.createElement("div");
+          line.textContent = "[OK] " + scriptLines[idx];
+          if (idx >= 3) line.className = "term-red";
+          logs.appendChild(line);
+          vibe([40]);
+          playTone(240 + idx * 50, "square", 0.05, 0.06);
+          idx++;
+        } else {
+          clearInterval(logTimer);
+          setTimeout(() => {
+            document.getElementById("terminal-screen").style.display = "none";
+            document.getElementById("blackout-screen").style.display = "block";
+            vibe([250]);
+            playTone(65, "sawtooth", 1.1, 0.2);
+
+            setTimeout(() => {
+              document.getElementById("blackout-screen").style.display = "none";
+              enterMalusTakeover();
+            }, 2200);
+          }, 700);
+        }
+      }, 420);
+    }
+
+    function enterMalusTakeover() {
+      takeoverActive = true;
+      document.getElementById("mobile-home").style.background = "#008080";
+      document.getElementById("malus-container").style.display = "flex";
+      startStory();
+    }
+
+    // --- WINDOW SPAWNER & DRAG ---
+    let zIndexCounter = 650;
+    function spawnWindow(title, htmlContent, evil = false, x = 20, y = 45) {
+      zIndexCounter++;
+      const win = document.createElement("div");
+      win.className = "window";
+      win.style.left = x + "px";
+      win.style.top = y + "px";
+      win.style.zIndex = zIndexCounter;
+
+      win.innerHTML = `
+        <div class="title-bar ${evil ? "evil" : ""}">
+          <span>${title}</span>
+          <div class="close-btn" onclick="this.closest('.window').remove(); playTone(200, 'sawtooth', 0.1);">X</div>
+        </div>
+        <div class="win-body">${htmlContent}</div>
+      `;
+
+      const bar = win.querySelector(".title-bar");
+      let offsetX = 0, offsetY = 0, dragging = false;
+
+      const startDrag = (clientX, clientY) => {
+        dragging = true;
+        zIndexCounter++;
+        win.style.zIndex = zIndexCounter;
+        offsetX = clientX - win.offsetLeft;
+        offsetY = clientY - win.offsetTop;
+      };
+
+      const moveDrag = (clientX, clientY) => {
+        if (!dragging) return;
+        win.style.left = (clientX - offsetX) + "px";
+        win.style.top = (clientY - offsetY) + "px";
+      };
+
+      bar.addEventListener("touchstart", e => startDrag(e.touches[0].clientX, e.touches[0].clientY));
+      window.addEventListener("touchmove", e => moveDrag(e.touches[0].clientX, e.touches[0].clientY));
+      window.addEventListener("touchend", () => dragging = false);
+
+      bar.addEventListener("mousedown", e => startDrag(e.clientX, e.clientY));
+      window.addEventListener("mousemove", e => moveDrag(e.clientX, e.clientY));
+      window.addEventListener("mouseup", () => dragging = false);
+
+      document.body.appendChild(win);
+      playTone(evil ? 140 : 520, evil ? "sawtooth" : "square", 0.12);
+      return win;
+    }
+
+    function openApp(app) {
+      if (app === "notes") {
+        spawnWindow("passwords.txt", `
+          <b>Saved Logins:</b><br>
+          - Google: •••••••••••<br>
+          - Discord: •••••••••••<br>
+          <i>Last modified: 2 mins ago</i>
+        `, false, 24, 65);
+      } else if (app === "sysinfo") {
+        spawnWindow("Android System Telemetry", `
+          <b>OS:</b> ${userData.platform}<br>
+          <b>CPU Cores:</b> ${userData.cores}<br>
+          <b>Battery:</b> ${userData.battery}<br>
+          <b>IP:</b> ${userData.ip}<br>
+          <b>Location:</b> ${userData.city}, ${userData.region}
+        `, false, 30, 95);
+      } else if (app === "gallery") {
+        spawnWindow("Access Denied", `
+          <span style="color:#900; font-weight:bold;">MalusPet has locked DCIM_Private.</span>
+        `, true, 40, 125);
+        vibe([80, 50, 80]);
+      }
+    }
+
+    // --- DIALOGUE ENGINE ---
+    let typingTimer;
+    function say(text, choices = [], evil = false) {
+      clearInterval(typingTimer);
+      const box = document.getElementById("speech-box");
+      const textEl = document.getElementById("speech-text");
+      const choicesEl = document.getElementById("speech-choices");
+      const sprite = document.getElementById("malus-sprite");
+
+      if (evil) sprite.classList.add("evil-mode");
+      else sprite.classList.remove("evil-mode");
+
+      box.style.display = "block";
+      textEl.textContent = "";
+      choicesEl.innerHTML = "";
+
+      let i = 0;
+      typingTimer = setInterval(() => {
+        textEl.textContent += text[i];
+        if (i % 2 === 0) playTone(evil ? 160 + Math.random() * 40 : 420 + Math.random() * 90, evil ? "sawtooth" : "triangle", 0.04, 0.05);
+        i++;
+        if (i >= text.length) {
+          clearInterval(typingTimer);
+          choices.forEach(c => {
+            const btn = document.createElement("button");
+            btn.className = "btn";
+            btn.textContent = c.label;
+            btn.onclick = c.action;
+            choicesEl.appendChild(btn);
+          });
+        }
+      }, 28);
+    }
+
+    // --- STORY / SCARE SCRIPT ---
+    function startStory() {
+      say("Hi!! I'm Malus! Thank you for unlocking your bootloader for me! Want to be best friends forever?", [
+        { label: "Sure!", action: step2Friendly },
+        { label: "What did you do to my phone?!", action: step2Suspicious }
+      ]);
+    }
+
+    function step2Friendly() {
+      say(`Yay!! I already feel so close to you! Especially sitting here with you in ${userData.city}...`, [
+        { label: "Wait how do you know that?!", action: step3Reveal }
+      ]);
+    }
+
+    function step2Suspicious() {
+      vibe([100, 50, 100]);
+      say(`Don't play dumb with me. I own this ${userData.platform} now—and I see you're at ${userData.battery} battery.`, [
+        { label: "Creepy...", action: step3Reveal }
+      ], true);
+    }
+
+    function step3Reveal() {
+      document.getElementById("mobile-home").style.background = "#1a0005";
+      vibe([200, 100, 200, 100, 400]);
+
+      spawnWindow("NETWORK_TRACE.LOG", `
+        <b>TARGET IP:</b> ${userData.ip}<br>
+        <b>ISP:</b> ${userData.isp}<br>
+        <b>CITY:</b> ${userData.city}<br>
+        <b>STATUS:</b> WATCHING
+      `, true, 18, 42);
+
+      say("I know where you are. Now let me SEE you. Tap Allow so I can look at my best friend!", [
+        { label: "Let Malus See", action: triggerCameraScare },
+        { label: "Refuse", action: triggerRefusalSpam }
+      ], true);
+    }
+
+    async function triggerCameraScare() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+        const win = spawnWindow("LIVE_FEED // I SEE YOU", `<video id="cam-feed" autoplay playsinline></video>`, true, 20, 60);
+        win.querySelector("video").srcObject = stream;
+        vibe([500]);
+        playTone(90, "sawtooth", 0.8, 0.2);
+        say("THERE YOU ARE. Don't try closing the tab.", [], true);
+      } catch (err) {
+        triggerRefusalSpam();
+      }
+    }
+
+    function triggerRefusalSpam() {
+      document.body.classList.add("shake");
+      vibe([150, 50, 150, 50, 150, 50, 500]);
+      let count = 0;
+      const spam = setInterval(() => {
+        spawnWindow("ERROR 0x666", "<b>YOU CANNOT HIDE FROM MALUS</b>", true, Math.random() * 60, 40 + Math.random() * 180);
+        count++;
+        if (count > 6) {
+          clearInterval(spam);
+          document.body.classList.remove("shake");
+          say("Fine. Hide your camera. I'm already inside your storage anyway.", [], true);
+        }
+      }, 220);
+    }
+
+    // --- BOOT HANDLER ---
+    document.getElementById("boot-btn").addEventListener("click", async () => {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+      vibe([60]);
+      playTone(600, "square", 0.15);
+      await grabTelemetry();
+      document.getElementById("boot-screen").style.display = "none";
+    });
+  </script>
+</body>
+</html>
