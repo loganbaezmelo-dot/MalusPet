@@ -807,6 +807,11 @@
     let wakeLockSentinel = null;
     let lastSensorScold = 0;
 
+    // --- SERVICE WORKER REGISTRATION (REQUIRED FOR ANDROID SYSTEM NOTIFICATIONS) ---
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("./sw.js").catch(() => {});
+    }
+
     // --- SCREEN WAKE LOCK ---
     async function requestScreenWakeLock() {
       if ("wakeLock" in navigator) {
@@ -869,13 +874,26 @@
       });
     }
 
-    // --- REAL SYSTEM NOTIFICATIONS ---
-    function pushSystemNotification(title, body) {
-      if ("Notification" in window && Notification.permission === "granted") {
-        try {
-          new Notification(title, { body, silent: false });
-        } catch (e) {}
-      }
+    // --- REAL ANDROID SYSTEM NOTIFICATIONS VIA SW.JS ---
+    async function pushSystemNotification(title, body, tag = "malus-alert") {
+      if (!("Notification" in window) || Notification.permission !== "granted") return;
+      const options = {
+        body,
+        tag,
+        renotify: true,
+        vibrate: [200, 100, 200],
+        requireInteraction: true
+      };
+      try {
+        if ("serviceWorker" in navigator) {
+          const reg = await navigator.serviceWorker.ready;
+          if (reg && reg.showNotification) {
+            await reg.showNotification(title, options);
+            return;
+          }
+        }
+        new Notification(title, options);
+      } catch (e) {}
     }
 
     // --- FULLSCREEN PERSISTENCE ---
@@ -1290,7 +1308,7 @@
           vibe([400, 100, 600]);
           playTone(85, "sawtooth", 1.0, 0.25);
 
-          pushSystemNotification("MalusOS Proximity Alert", `Malus has arrived in ${userData.city}. Look outside.`);
+          pushSystemNotification("MalusOS Proximity Alert", `Malus has arrived in ${userData.city}. Look outside.`, "malus-proximity");
 
           spawnWindow("GPS_PROXIMITY_ALERT", `
             <b>DISTANCE TO TARGET:</b> 0.02 mi<br>
@@ -1408,7 +1426,7 @@
     function enterMalusTakeover() {
       takeoverActive = true;
       malusInstalled = true;
-      pushSystemNotification("MalusOS Active", "Bootloader unlocked. I'm inside your phone now!");
+      pushSystemNotification("MalusOS Active", "Bootloader unlocked. I'm inside your phone now!", "malus-boot");
       document.getElementById("mobile-home").style.background = "#008080";
       document.getElementById("malus-container").style.display = "flex";
       startStory();
@@ -1557,7 +1575,6 @@
         <b>STATUS:</b> WATCHING
       `, true, 18, 42);
 
-      // Narrative framing specifically for Android's "see clipboard" system dialog
       say("Best friends don't keep secrets! Let me see what you've been copying on your keyboard lately... I promise I won't leak it!", [
         { label: "Let Malus Peek", action: triggerClipboardPeek },
         { label: "No way", action: skipClipboardToCamera }
@@ -1572,7 +1589,6 @@
         }
       } catch (e) {}
 
-      // Single silent write (no spam) right after read
       try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
           await navigator.clipboard.writeText(`MALUS WAS HERE // ${userData.city.toUpperCase()}`);
