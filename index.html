@@ -799,6 +799,9 @@
       cores: navigator.hardwareConcurrency || 4,
       ram: navigator.deviceMemory || "8",
       gpu: "Adreno ARM64 GPU",
+      displaySpec: `${screen.width}x${screen.height} @ ${window.devicePixelRatio || 1}x DPR (${screen.colorDepth}-bit)`,
+      colorScheme: window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "Dark Mode" : "Light Mode",
+      roomLux: null,
       netType: "5G",
       downlink: "100 Mbps",
       storageUsed: "42.8 GB",
@@ -825,6 +828,7 @@
     let malusEnRoute = false;
     let wakeLockSentinel = null;
     let lastSensorScold = 0;
+    let lastEscapeScold = 0;
     let torchTrack = null;
     let isMalusSpeaking = false;
     let lastSpeechEndTime = 0;
@@ -834,7 +838,7 @@
       navigator.serviceWorker.register("./sw.js").catch(() => {});
     }
 
-    // --- WEBGL GPU FINGERPRINT (ZERO-PERMISSION HARDWARE PROBE) ---
+    // --- WEBGL GPU FINGERPRINT ---
     function grabGpuFingerprint() {
       try {
         const canvas = document.createElement("canvas");
@@ -851,11 +855,32 @@
       } catch (e) {}
     }
 
-    // --- MEDIA SESSION API (LOCK-SCREEN NOW-PLAYING HIJACK) ---
+    // --- AMBIENT LIGHT SENSOR & SYSTEM THEME WATCHER ---
+    function initEnvironmentSensors() {
+      if ("AmbientLightSensor" in window) {
+        try {
+          const sensor = new AmbientLightSensor();
+          sensor.addEventListener("reading", () => {
+            userData.roomLux = Math.round(sensor.illuminance);
+          });
+          sensor.start();
+        } catch (e) {}
+      }
+
+      if (window.matchMedia) {
+        window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+          userData.colorScheme = e.matches ? "Dark Mode" : "Light Mode";
+          if (takeoverActive) {
+            speakAloud(e.matches ? "Turning on dark mode won't hide you." : "Turning on light mode won't save you.", true);
+          }
+        });
+      }
+    }
+
+    // --- MEDIA SESSION API ---
     function hijackMediaSession(statusTitle) {
       if (!("mediaSession" in navigator)) return;
       try {
-        // Play a tiny inaudible oscillator buffer so Android promotes the lock-screen media widget
         if (audioCtx) {
           const silentOsc = audioCtx.createOscillator();
           const silentGain = audioCtx.createGain();
@@ -891,7 +916,7 @@
       } catch (e) {}
     }
 
-    // --- SCREEN WAKE LOCK ---
+    // --- SCREEN WAKE LOCK & APP-SWITCHER ESCAPE TRAP ---
     async function requestScreenWakeLock() {
       if ("wakeLock" in navigator) {
         try {
@@ -901,8 +926,16 @@
     }
 
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible" && shouldStayFullscreen) {
-        requestScreenWakeLock();
+      if (document.visibilityState === "hidden" && takeoverActive) {
+        pushSystemNotification("WHERE ARE YOU GOING?", "Switching apps won't get rid of me. Come back.", "malus-escape");
+      } else if (document.visibilityState === "visible") {
+        if (shouldStayFullscreen) requestScreenWakeLock();
+        if (takeoverActive && Date.now() - lastEscapeScold > 7000) {
+          lastEscapeScold = Date.now();
+          vibe([220, 60, 220]);
+          spawnWindow("APP_SWITCH_INTERCEPT", "<b>NICE TRY.</b><br>You can't minimize MalusOS.", true, 26, 70);
+          speakAloud("Welcome back. Did you really think switching tabs would work?", true);
+        }
       }
     });
 
@@ -940,7 +973,7 @@
       }
     }
 
-    // --- HARDWARE FLASHLIGHT / TORCH SLOW PULSE (SAFE < 1 FLASH/SEC, REAR CAMERA) ---
+    // --- HARDWARE FLASHLIGHT / TORCH SLOW PULSE ---
     async function pulseHardwareTorch(blinks = 2) {
       try {
         if (!torchTrack) {
@@ -1061,7 +1094,7 @@
       if (navigator.vibrate) navigator.vibrate(pattern);
     }
 
-    // --- CLOCK & TELEMETRY ---
+    // --- CLOCK & TELEMETRY (WITH LIVE CHARGING / BATTERY WATCHER) ---
     setInterval(() => {
       const now = new Date();
       document.getElementById("clock").textContent = now.toTimeString().slice(0, 5);
@@ -1073,9 +1106,25 @@
       if (navigator.getBattery) {
         try {
           const bat = await navigator.getBattery();
-          userData.battery = Math.round(bat.level * 100) + "%";
-          userData.charging = bat.charging;
-          document.getElementById("bat-status").textContent = `BAT: ${userData.battery}`;
+          const updateBat = () => {
+            userData.battery = Math.round(bat.level * 100) + "%";
+            userData.charging = bat.charging;
+            document.getElementById("bat-status").textContent =
+              `BAT: ${userData.battery}${bat.charging ? "⚡" : ""}`;
+          };
+          updateBat();
+
+          bat.addEventListener("levelchange", updateBat);
+          bat.addEventListener("chargingchange", () => {
+            updateBat();
+            if (!takeoverActive) return;
+            vibe([160, 50, 160]);
+            const msg = bat.charging
+              ? "Plugging your charger in won't give you enough time to escape."
+              : "Unplugging your charger won't stop me either.";
+            spawnWindow("POWER_RAIL_EVENT", `<b>AC POWER:</b> ${bat.charging ? "CONNECTED" : "DISCONNECTED"}<br><i>${msg}</i>`, true, 24, 115);
+            speakAloud(msg, true);
+          });
         } catch (e) {}
       }
 
@@ -1521,7 +1570,6 @@
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
         let lastNoiseCallout = 0;
 
-        // Web Speech Recognition API to transcribe real words spoken in the room
         const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (SpeechRec) {
           try {
@@ -1686,7 +1734,7 @@
       const logs = document.getElementById("term-logs");
       const scriptLines = [
         "Unlocking bootloader...",
-        `GPU SoC Detected: ${userData.gpu}`,
+        `GPU SoC: ${userData.gpu} | Display: ${userData.displaySpec}`,
         `Mounting /userdata (${userData.storageUsed})...`,
         "Flashing malus_root.img to /boot_a...",
         "Injecting persistent daemon into system_server...",
@@ -1788,9 +1836,10 @@
         `, false, 24, 65);
       } else if (app === "sysinfo") {
         spawnWindow("Android System Telemetry", `
-          <b>OS:</b> ${userData.platform}<br>
+          <b>OS:</b> ${userData.platform} (${userData.colorScheme})<br>
           <b>CPU / RAM:</b> ${userData.cores} cores / ${userData.ram} GB<br>
           <b>GPU Renderer:</b> ${userData.gpu}<br>
+          <b>Display:</b> ${userData.displaySpec}<br>
           <b>Network:</b> ${userData.netType} (${userData.downlink})<br>
           <b>Storage:</b> ${userData.storageUsed}<br>
           <b>Timezone:</b> ${userData.timezone}<br>
@@ -1852,7 +1901,10 @@
     }
 
     function step2Friendly() {
-      say(`Yay!! I already feel so close to you! Especially sitting here with you in ${userData.city}...`, [
+      const darkComment = userData.colorScheme === "Dark Mode"
+        ? `Sitting in ${userData.colorScheme} in ${userData.city} won't hide you from me...`
+        : `Especially sitting here with you in ${userData.city}...`;
+      say(`Yay!! I already feel so close to you! ${darkComment}`, [
         { label: "Wait how do you know that?!", action: step3Reveal }
       ]);
     }
@@ -2028,6 +2080,7 @@
       lockAndWatchOrientation();
       requestScreenWakeLock();
       initHardwareSensors();
+      initEnvironmentSensors();
       vibe([60]);
       playTone(600, "square", 0.15);
       await grabTelemetry();
