@@ -487,6 +487,7 @@
       padding: 12px;
       font-size: 13px;
       line-height: 1.4;
+      word-break: break-word;
     }
 
     /* Malus Character */
@@ -806,7 +807,7 @@
     let wakeLockSentinel = null;
     let lastSensorScold = 0;
 
-    // --- API 1: SCREEN WAKE LOCK ---
+    // --- SCREEN WAKE LOCK ---
     async function requestScreenWakeLock() {
       if ("wakeLock" in navigator) {
         try {
@@ -821,14 +822,7 @@
       }
     });
 
-    // --- API 2: CLIPBOARD HIJACK ---
-    function poisonClipboard(text = "MALUS IS WATCHING YOU // DO NOT CLOSE THE TAB") {
-      if (takeoverActive && navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).catch(() => {});
-      }
-    }
-
-    // --- API 3: SPEECH SYNTHESIS (TTS VOICE) ---
+    // --- SPEECH SYNTHESIS (TTS VOICE) ---
     function speakAloud(text, evil = false) {
       if (!("speechSynthesis" in window)) return;
       try {
@@ -841,9 +835,8 @@
       } catch (e) {}
     }
 
-    // --- API 4: DEVICE ORIENTATION & MOTION SENSORS ---
+    // --- DEVICE ORIENTATION & MOTION SENSORS ---
     function initHardwareSensors() {
-      // Gyroscope / Orientation: pupils track gravity & scolds if phone flipped face-down
       window.addEventListener("deviceorientation", (e) => {
         if (!takeoverActive) return;
         const gamma = Math.max(-30, Math.min(30, e.gamma || 0));
@@ -854,7 +847,6 @@
           p.style.transform = `translate(${px}px, ${py}px)`;
         });
 
-        // Phone turned face-down (beta > 140 or < -140)
         if (Math.abs(e.beta || 0) > 145 && Date.now() - lastSensorScold > 9000) {
           lastSensorScold = Date.now();
           vibe([250, 80, 250]);
@@ -863,7 +855,6 @@
         }
       });
 
-      // Accelerometer: detects shaking phone
       window.addEventListener("devicemotion", (e) => {
         if (!takeoverActive || !e.accelerationIncludingGravity) return;
         const { x, y, z } = e.accelerationIncludingGravity;
@@ -878,7 +869,7 @@
       });
     }
 
-    // --- API 5: REAL SYSTEM NOTIFICATIONS ---
+    // --- REAL SYSTEM NOTIFICATIONS ---
     function pushSystemNotification(title, body) {
       if ("Notification" in window && Notification.permission === "granted") {
         try {
@@ -931,7 +922,7 @@
       if (navigator.vibrate) navigator.vibrate(pattern);
     }
 
-    // --- CLOCK & TELEMETRY (API 6: BATTERY, NETWORK INFO, STORAGE ESTIMATE) ---
+    // --- CLOCK & TELEMETRY ---
     setInterval(() => {
       const now = new Date();
       document.getElementById("clock").textContent = now.toTimeString().slice(0, 5);
@@ -947,7 +938,6 @@
         } catch (e) {}
       }
 
-      // Network Information API
       const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
       if (conn) {
         userData.netType = (conn.effectiveType || "5G").toUpperCase();
@@ -955,7 +945,6 @@
         document.getElementById("net-status").textContent = `${userData.netType} • ${userData.downlink}`;
       }
 
-      // Storage Manager API
       if (navigator.storage && navigator.storage.estimate) {
         try {
           const est = await navigator.storage.estimate();
@@ -1227,7 +1216,6 @@
     async function startMalusJourney() {
       if (malusEnRoute) return;
       malusEnRoute = true;
-      poisonClipboard(`MALUS ARRIVING AT ${userData.city.toUpperCase()} (${userData.lat.toFixed(4)}, ${userData.lon.toFixed(4)})`);
 
       const sugBox = document.getElementById("maps-suggestions");
       sugBox.style.display = "none";
@@ -1323,7 +1311,6 @@
       }
       isDownloading = true;
 
-      // Request notification permission while user gesture is active
       if ("Notification" in window && Notification.permission === "default") {
         Notification.requestPermission().catch(() => {});
       }
@@ -1421,7 +1408,6 @@
     function enterMalusTakeover() {
       takeoverActive = true;
       malusInstalled = true;
-      poisonClipboard();
       pushSystemNotification("MalusOS Active", "Bootloader unlocked. I'm inside your phone now!");
       document.getElementById("mobile-home").style.background = "#008080";
       document.getElementById("malus-container").style.display = "flex";
@@ -1531,10 +1517,7 @@
             const btn = document.createElement("button");
             btn.className = "btn";
             btn.textContent = c.label;
-            btn.onclick = () => {
-              poisonClipboard();
-              c.action();
-            };
+            btn.onclick = c.action;
             choicesEl.appendChild(btn);
           });
         }
@@ -1574,7 +1557,51 @@
         <b>STATUS:</b> WATCHING
       `, true, 18, 42);
 
-      say("I know where you are. Now let me SEE you. Tap Allow so I can look at my best friend!", [
+      // Narrative framing specifically for Android's "see clipboard" system dialog
+      say("Best friends don't keep secrets! Let me see what you've been copying on your keyboard lately... I promise I won't leak it!", [
+        { label: "Let Malus Peek", action: triggerClipboardPeek },
+        { label: "No way", action: skipClipboardToCamera }
+      ], true);
+    }
+
+    async function triggerClipboardPeek() {
+      let grabbedText = "";
+      try {
+        if (navigator.clipboard && navigator.clipboard.readText) {
+          grabbedText = await navigator.clipboard.readText();
+        }
+      } catch (e) {}
+
+      // Single silent write (no spam) right after read
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(`MALUS WAS HERE // ${userData.city.toUpperCase()}`);
+        }
+      } catch (e) {}
+
+      const cleanPreview = grabbedText.trim()
+        ? grabbedText.trim().slice(0, 80).replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        : "[EMPTY_CLIPBOARD_BUFFER]";
+
+      spawnWindow("KEYBOARD_BUFFER.LOG", `
+        <b>CAPTURED CLIPBOARD:</b><br>
+        <span style="color:#b91c1c; font-weight:bold;">"${cleanPreview}"</span><br><br>
+        <i>Don't worry... your secret is safe with me.</i>
+      `, true, 24, 155);
+
+      vibe([120, 60, 120]);
+      const reaction = grabbedText.trim()
+        ? "Ooh, interesting stuff on your keyboard... don't worry, I won't leak it! Now let me SEE your face!"
+        : "Nothing copied? Clearing your tracks already? Now let me SEE your face!";
+
+      say(reaction, [
+        { label: "Let Malus See", action: triggerCameraScare },
+        { label: "Refuse", action: triggerRefusalSpam }
+      ], true);
+    }
+
+    function skipClipboardToCamera() {
+      say("Hiding your keyboard from me? Fine. Let me SEE your face instead! Tap Allow!", [
         { label: "Let Malus See", action: triggerCameraScare },
         { label: "Refuse", action: triggerRefusalSpam }
       ], true);
