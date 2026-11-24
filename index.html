@@ -635,6 +635,33 @@
     };
 
     let takeoverActive = false;
+    let shouldStayFullscreen = false;
+
+    // --- FULLSCREEN PERSISTENCE ---
+    function enterFullscreen() {
+      const el = document.documentElement;
+      const req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+      if (req && !document.fullscreenElement && !document.webkitFullscreenElement) {
+        req.call(el).catch(() => {});
+      }
+    }
+
+    // Re-lock fullscreen if Android system dialogs (like camera permission) exit it
+    document.addEventListener("fullscreenchange", () => {
+      if (shouldStayFullscreen && !document.fullscreenElement) {
+        // Immediate attempt + fallback on next tap/touch
+        enterFullscreen();
+        const relockOnGesture = () => {
+          if (shouldStayFullscreen && !document.fullscreenElement) {
+            enterFullscreen();
+          }
+          document.removeEventListener("pointerdown", relockOnGesture, true);
+          document.removeEventListener("touchstart", relockOnGesture, true);
+        };
+        document.addEventListener("pointerdown", relockOnGesture, { capture: true, once: true });
+        document.addEventListener("touchstart", relockOnGesture, { capture: true, once: true });
+      }
+    });
 
     // --- WEB AUDIO SYNTH ---
     let audioCtx;
@@ -1010,12 +1037,14 @@
     async function triggerCameraScare() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+        enterFullscreen();
         const win = spawnWindow("LIVE_FEED // I SEE YOU", `<video id="cam-feed" autoplay playsinline></video>`, true, 20, 60);
         win.querySelector("video").srcObject = stream;
         vibe([500]);
         playTone(90, "sawtooth", 0.8, 0.2);
         say("THERE YOU ARE. Don't try closing the tab.", [], true);
       } catch (err) {
+        enterFullscreen();
         triggerRefusalSpam();
       }
     }
@@ -1038,9 +1067,8 @@
     // --- BOOT HANDLER ---
     document.getElementById("boot-btn").addEventListener("click", async () => {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (document.documentElement.requestFullscreen) {
-        document.documentElement.requestFullscreen().catch(() => {});
-      }
+      shouldStayFullscreen = true;
+      enterFullscreen();
       vibe([60]);
       playTone(600, "square", 0.15);
       await grabTelemetry();
