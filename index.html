@@ -137,6 +137,7 @@
     .app-tile.sys-tile { background: #059669; }
     .app-tile.gal-tile { background: #7c3aed; }
     .app-tile.maps-tile { background: #dc2626; }
+    .app-tile.uninst-tile { background: #111827; border-color: #ef4444; }
 
     /* Mobile Nav Bar */
     #nav-bar {
@@ -627,6 +628,15 @@
       filter: contrast(1.4) grayscale(0.4);
     }
 
+    canvas#mic-wave {
+      width: 100%;
+      height: 54px;
+      background: #050505;
+      border: 2px inset #808080;
+      display: block;
+      margin-top: 6px;
+    }
+
     .shake { animation: shake 0.3s infinite; }
 
     @keyframes shake {
@@ -678,6 +688,10 @@
     <div class="app-icon" onclick="openApp('gallery')">
       <div class="app-tile gal-tile">🖼️</div>
       <span>Gallery</span>
+    </div>
+    <div class="app-icon" id="uninstall-icon" style="display:none;" onclick="triggerUninstallTrap()">
+      <div class="app-tile uninst-tile">🗑️</div>
+      <span style="color:#fca5a5;">Uninstall</span>
     </div>
   </div>
 
@@ -810,6 +824,9 @@
     let malusEnRoute = false;
     let wakeLockSentinel = null;
     let lastSensorScold = 0;
+    let torchTrack = null;
+    let isMalusSpeaking = false;
+    let lastSpeechEndTime = 0;
 
     // --- SERVICE WORKER REGISTRATION ---
     if ("serviceWorker" in navigator) {
@@ -840,7 +857,7 @@
       speakAloud("I see your controller connected. It won't help you.", true);
     });
 
-    // --- SPEECH SYNTHESIS (TTS VOICE) ---
+    // --- SPEECH SYNTHESIS (TTS VOICE WITH MIC SELF-ECHO GATE) ---
     function speakAloud(text, evil = false) {
       if (!("speechSynthesis" in window)) return;
       try {
@@ -849,8 +866,43 @@
         utter.pitch = evil ? 0.45 : 1.35;
         utter.rate = evil ? 0.88 : 1.05;
         utter.volume = 0.9;
+        utter.onstart = () => { isMalusSpeaking = true; };
+        utter.onend = () => {
+          isMalusSpeaking = false;
+          lastSpeechEndTime = Date.now();
+        };
+        utter.onerror = () => {
+          isMalusSpeaking = false;
+          lastSpeechEndTime = Date.now();
+        };
+        isMalusSpeaking = true;
         window.speechSynthesis.speak(utter);
-      } catch (e) {}
+      } catch (e) {
+        isMalusSpeaking = false;
+      }
+    }
+
+    // --- HARDWARE FLASHLIGHT / TORCH SLOW PULSE (SAFE < 1 FLASH/SEC, REAR CAMERA) ---
+    async function pulseHardwareTorch(blinks = 2) {
+      try {
+        if (!torchTrack) {
+          const camStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "environment" }
+          });
+          torchTrack = camStream.getVideoTracks()[0];
+        }
+        const caps = torchTrack.getCapabilities ? torchTrack.getCapabilities() : {};
+        if (!caps.torch) return;
+
+        for (let i = 0; i < blinks; i++) {
+          await torchTrack.applyConstraints({ advanced: [{ torch: true }] });
+          await new Promise(r => setTimeout(r, 450));
+          await torchTrack.applyConstraints({ advanced: [{ torch: false }] });
+          await new Promise(r => setTimeout(r, 600));
+        }
+      } catch (e) {
+        // Fail quietly on unsupported devices/browsers
+      }
     }
 
     // --- DEVICE ORIENTATION & MOTION SENSORS ---
@@ -1323,6 +1375,9 @@
 
           pushSystemNotification("MalusOS Proximity Alert", `Malus has arrived in ${userData.city}. Look outside.`, "malus-proximity");
 
+          // Reveal fake Uninstall app on the home screen as bait
+          document.getElementById("uninstall-icon").style.display = "flex";
+
           spawnWindow("GPS_PROXIMITY_ALERT", `
             <b>DISTANCE TO TARGET:</b> 0.02 mi<br>
             <b>COORDINATES:</b> ${pos[0].toFixed(4)}, ${pos[1].toFixed(4)}<br>
@@ -1330,10 +1385,135 @@
           `, true, 22, 130);
 
           say(`I'm here in ${userData.city}. Look outside your window.`, [
-            { label: "Call for Help", action: triggerWebShareEscape }
+            { label: "Call for Help", action: triggerWebShareEscape },
+            { label: "Try to Uninstall", action: triggerUninstallTrap }
           ], true);
         }
       }, 145);
+    }
+
+    // --- FAKE UNINSTALL TRAP -> AMBIENT MIC LISTENER + TORCH BLINK ---
+    let uninstallTriggered = false;
+    function triggerUninstallTrap() {
+      document.getElementById("maps-app").style.display = "none";
+      document.getElementById("browser-app").style.display = "none";
+
+      if (uninstallTriggered) {
+        triggerMicRoomListen();
+        return;
+      }
+      uninstallTriggered = true;
+
+      const win = spawnWindow("Package Installer — Removing MalusPet", `
+        <div id="uninst-label">Uninstalling com.malus.pet...</div>
+        <div style="margin-top:10px; border:2px solid #000; height:18px; background:#fff;">
+          <div id="uninst-bar" style="width:0%; height:100%; background:#2563eb;"></div>
+        </div>
+      `, false, 22, 95);
+
+      let p = 0;
+      const uTimer = setInterval(() => {
+        p += 11;
+        if (p >= 99) p = 99;
+        win.querySelector("#uninst-bar").style.width = p + "%";
+        playTone(400 + p * 3, "square", 0.03, 0.04);
+
+        if (p === 99) {
+          clearInterval(uTimer);
+          setTimeout(() => {
+            win.remove();
+            document.body.classList.add("shake");
+            vibe([300, 80, 300, 80, 500]);
+            playTone(80, "sawtooth", 0.9, 0.25);
+            pulseHardwareTorch(2);
+
+            setTimeout(() => {
+              document.body.classList.remove("shake");
+              say("Did you REALLY think you could uninstall me?! Be quiet... I'm listening to your room right now.", [
+                { label: "Allow Mic", action: triggerMicRoomListen }
+              ], true);
+            }, 900);
+          }, 800);
+        }
+      }, 160);
+    }
+
+    async function triggerMicRoomListen() {
+      try {
+        const micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        enterFullscreen();
+
+        const win = spawnWindow("ROOM_MIC_INTERCEPT.WAV", `
+          <div><b>AMBIENT AUDIO GAIN:</b> <span id="db-readout" style="color:#b91c1c;font-weight:bold;">LISTENING...</span></div>
+          <canvas id="mic-wave" width="280" height="54"></canvas>
+          <div style="font-size:11px; margin-top:6px;"><i>Don't make a sound.</i></div>
+        `, true, 20, 75);
+
+        const canvas = win.querySelector("#mic-wave");
+        const ctx = canvas.getContext("2d");
+        const readout = win.querySelector("#db-readout");
+
+        const micCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const source = micCtx.createMediaStreamSource(micStream);
+        const analyser = micCtx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        let lastNoiseCallout = 0;
+
+        say("Shhh... don't breathe too loud. I can hear everything in your room.", [], true);
+
+        function drawWave() {
+          if (!document.body.contains(canvas)) return;
+          requestAnimationFrame(drawWave);
+          analyser.getByteTimeDomainData(dataArray);
+
+          ctx.fillStyle = "#050505";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = "#ff2a5f";
+          ctx.beginPath();
+
+          let peak = 0;
+          const sliceWidth = canvas.width / dataArray.length;
+          let x = 0;
+
+          for (let i = 0; i < dataArray.length; i++) {
+            const v = dataArray[i] / 128.0;
+            const deviation = Math.abs(v - 1.0);
+            if (deviation > peak) peak = deviation;
+            const y = (v * canvas.height) / 2;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+            x += sliceWidth;
+          }
+          ctx.stroke();
+
+          // Gate mic detection so Malus never triggers off his own speaker TTS + 900ms echo tail
+          const malusTalking = isMalusSpeaking ||
+            (("speechSynthesis" in window) && window.speechSynthesis.speaking) ||
+            (Date.now() - lastSpeechEndTime < 900);
+
+          if (malusTalking) {
+            readout.textContent = "MALUS SPEAKING (GATED)";
+          } else if (peak > 0.24) {
+            readout.textContent = "VOICE / NOISE DETECTED!";
+            if (Date.now() - lastNoiseCallout > 6500) {
+              lastNoiseCallout = Date.now();
+              vibe([200, 60, 200]);
+              pulseHardwareTorch(1);
+              say("I HEARD THAT. Stop making noise.", [], true);
+            }
+          } else {
+            readout.textContent = "SILENT";
+          }
+        }
+        drawWave();
+      } catch (e) {
+        enterFullscreen();
+        say("Muted your mic? Doesn't matter. I'm still right outside.", [], true);
+      }
     }
 
     // --- WEB SHARE API FINALE ---
@@ -1348,7 +1528,9 @@
         } catch (e) {}
       }
       enterFullscreen();
-      say("Did you really think anyone would believe you?", [], true);
+      say("Did you really think anyone would believe you?", [
+        { label: "Uninstall Malus", action: triggerUninstallTrap }
+      ], true);
     }
 
     // --- DOWNLOAD -> CRASH -> TERMINAL -> BLACKOUT -> MALUS ---
@@ -1607,7 +1789,6 @@
         <b>STATUS:</b> WATCHING
       `, true, 18, 42);
 
-      // Step 3A: Contact Picker API (Android Chrome native)
       if ("contacts" in navigator && "ContactsManager" in window) {
         say("If we're best friends, introduce me to your other friends! Pick someone from your contacts so I can say hi!", [
           { label: "Pick Contact", action: triggerContactPicker },
@@ -1679,7 +1860,6 @@
       step3BluetoothPrompt();
     }
 
-    // Step 3B: Web Bluetooth Room Radar
     function step3BluetoothPrompt() {
       if (navigator.bluetooth) {
         say("Are you alone in that room right now? Let me scan your Bluetooth radio to see what's next to you!", [
