@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>MalusOS Mobile</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
     :root {
       --bg: #008080;
@@ -134,6 +136,7 @@
     .app-tile.notes-tile { background: #d97706; }
     .app-tile.sys-tile { background: #059669; }
     .app-tile.gal-tile { background: #7c3aed; }
+    .app-tile.maps-tile { background: #dc2626; }
 
     /* Mobile Nav Bar */
     #nav-bar {
@@ -211,6 +214,127 @@
       height: 100%;
       border: none;
       display: none;
+    }
+
+    /* Maps App */
+    #maps-app {
+      position: fixed;
+      inset: 28px 0 48px 0;
+      background: #e5e7eb;
+      display: none;
+      flex-direction: column;
+      z-index: 520;
+    }
+
+    #maps-header {
+      background: #111827;
+      color: #fff;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 1000;
+      border-bottom: 2px solid #374151;
+    }
+
+    .maps-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    #maps-dest-input {
+      flex: 1;
+      padding: 8px 10px;
+      border-radius: 6px;
+      border: 2px solid #4b5563;
+      font-size: 13px;
+      background: #fff;
+      color: #000;
+      user-select: text;
+      -webkit-user-select: text;
+    }
+
+    #maps-dest-input.hijacked {
+      border-color: #ef4444;
+      background: #fef2f2;
+    }
+
+    #maps-go-btn {
+      padding: 8px 12px;
+      background: #dc2626;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-weight: bold;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    #maps-suggestions {
+      background: #fff;
+      color: #000;
+      border: 2px solid #000;
+      border-radius: 6px;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .map-sug-item {
+      padding: 10px 12px;
+      font-size: 13px;
+      font-weight: bold;
+      border-bottom: 1px solid #e5e7eb;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .map-sug-item:active {
+      background: #fee2e2;
+    }
+
+    #map-canvas {
+      flex: 1;
+      width: 100%;
+      z-index: 1;
+    }
+
+    #maps-banner {
+      background: #000;
+      color: #f87171;
+      font-size: 12px;
+      padding: 6px 10px;
+      font-weight: bold;
+      display: none;
+      text-align: center;
+    }
+
+    /* Pulsing Malus Dot on Map */
+    .malus-dot-marker {
+      width: 22px;
+      height: 22px;
+      background: #ff1e42;
+      border: 3px solid #fff;
+      border-radius: 50%;
+      box-shadow: 0 0 14px #ff0000, 0 0 4px #000;
+      animation: pulseDot 1s infinite;
+    }
+
+    .target-dot-marker {
+      width: 18px;
+      height: 18px;
+      background: #2563eb;
+      border: 3px solid #fff;
+      border-radius: 50%;
+      box-shadow: 0 0 10px #2563eb;
+    }
+
+    @keyframes pulseDot {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.25); }
     }
 
     /* Fake maluspet.com pages */
@@ -539,6 +663,10 @@
       <div class="app-tile browser-tile">🌐</div>
       <span>Browser</span>
     </div>
+    <div class="app-icon" onclick="openMaps(false)">
+      <div class="app-tile maps-tile">🗺️</div>
+      <span>Maps</span>
+    </div>
     <div class="app-icon" onclick="openApp('notes')">
       <div class="app-tile notes-tile">📝</div>
       <span>Notes</span>
@@ -561,10 +689,7 @@
       <button id="go-btn" onclick="loadUrl(document.getElementById('url-input').value)">GO</button>
     </div>
     <div id="browser-viewport">
-      <!-- Real webpage iframe -->
       <iframe id="real-web-frame" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
-
-      <!-- Fake maluspet.com domain -->
       <div id="malus-site">
         <div class="site-nav">
           <span class="site-link" onclick="renderMalusPage('home')">Home</span>
@@ -574,6 +699,23 @@
         <div id="malus-page-content"></div>
       </div>
     </div>
+  </div>
+
+  <!-- In-App OpenStreetMap App -->
+  <div id="maps-app">
+    <div id="maps-header">
+      <div class="maps-row">
+        <span style="font-size:12px; color:#9ca3af;">From:</span>
+        <span id="maps-origin-label" style="font-size:12px; font-weight:bold; color:#f87171;">Current GPS</span>
+      </div>
+      <div class="maps-row">
+        <input id="maps-dest-input" type="text" placeholder="Where to?" autocomplete="off" />
+        <button id="maps-go-btn" onclick="handleManualMapSearch()">ROUTE</button>
+      </div>
+      <div id="maps-suggestions"></div>
+    </div>
+    <div id="maps-banner"></div>
+    <div id="map-canvas"></div>
   </div>
 
   <!-- Bottom Mobile Navigation Bar -->
@@ -632,19 +774,32 @@
   <script>
     // --- TELEMETRY STATE ---
     const userData = {
-      city: "your city",
-      region: "",
+      city: "Miami",
+      region: "Florida",
       ip: "192.168.1.X",
       isp: "your carrier",
+      lat: 25.7617,
+      lon: -80.1918,
       battery: "unknown",
       cores: navigator.hardwareConcurrency || 4,
       platform: navigator.userAgent.includes("Android") ? "Android" : "Mobile Device"
     };
 
+    // Random street spots in Orlando, FL
+    const orlandoStreets = [
+      { name: "S Orange Ave & Church St, Orlando, FL", lat: 28.5403, lon: -81.3790 },
+      { name: "International Dr, Orlando, FL", lat: 28.4452, lon: -81.4678 },
+      { name: "E Colonial Dr & Mills Ave, Orlando, FL", lat: 28.5535, lon: -81.3649 },
+      { name: "N Magnolia Ave, Orlando, FL", lat: 28.5461, lon: -81.3775 }
+    ];
+    const malusStartSpot = orlandoStreets[Math.floor(Math.random() * orlandoStreets.length)];
+
     let takeoverActive = false;
     let malusInstalled = false;
     let isDownloading = false;
     let shouldStayFullscreen = false;
+    let mapHijackMode = false;
+    let malusEnRoute = false;
 
     // --- FULLSCREEN PERSISTENCE ---
     function enterFullscreen() {
@@ -711,19 +866,32 @@
         if (data.region) userData.region = data.region;
         if (data.ip) userData.ip = data.ip;
         if (data.org) userData.isp = data.org;
+        if (data.latitude) userData.lat = parseFloat(data.latitude);
+        if (data.longitude) userData.lon = parseFloat(data.longitude);
       } catch (e) {}
     }
 
     // --- MOBILE NAVIGATION & BROWSER ---
     function openBrowser() {
+      document.getElementById("maps-app").style.display = "none";
       document.getElementById("browser-app").style.display = "flex";
       loadUrl("https://maluspet.com");
       playTone(500, "sine", 0.06);
     }
 
     function goHome() {
+      if (mapHijackMode || malusEnRoute) {
+        vibe([100, 40, 100]);
+        playTone(110, "sawtooth", 0.15);
+        return;
+      }
       if (document.getElementById("browser-app").style.display === "flex") {
         document.getElementById("browser-app").style.display = "none";
+        playTone(380, "sine", 0.05);
+        return;
+      }
+      if (document.getElementById("maps-app").style.display === "flex") {
+        document.getElementById("maps-app").style.display = "none";
         playTone(380, "sine", 0.05);
         return;
       }
@@ -811,6 +979,240 @@
           <button class="btn" onclick="renderMalusPage('home')">I Agree</button>
         `;
       }
+    }
+
+    // --- OPENSTREETMAP APP ---
+    let leafletMap = null;
+    let malusMarker = null;
+    let targetMarker = null;
+    let routeLine = null;
+
+    function initMapIfNeeded(centerLat, centerLon, zoom = 15) {
+      if (!leafletMap) {
+        leafletMap = L.map("map-canvas", { zoomControl: false }).setView([centerLat, centerLon], zoom);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution: "&copy; OpenStreetMap"
+        }).addTo(leafletMap);
+      } else {
+        leafletMap.setView([centerLat, centerLon], zoom);
+      }
+      setTimeout(() => leafletMap.invalidateSize(), 120);
+    }
+
+    function openMaps(hijacked = false) {
+      document.getElementById("browser-app").style.display = "none";
+      document.getElementById("maps-app").style.display = "flex";
+      mapHijackMode = hijacked;
+
+      const destInput = document.getElementById("maps-dest-input");
+      const sugBox = document.getElementById("maps-suggestions");
+      const banner = document.getElementById("maps-banner");
+      const originLabel = document.getElementById("maps-origin-label");
+
+      sugBox.style.display = "none";
+      destInput.value = "";
+
+      if (hijacked) {
+        originLabel.textContent = malusStartSpot.name;
+        destInput.classList.add("hijacked");
+        destInput.placeholder = "Tap here to choose destination...";
+        banner.style.display = "block";
+        banner.textContent = "MALUS_GPS OVERRIDE // SELECT YOUR LOCATION";
+
+        initMapIfNeeded(malusStartSpot.lat, malusStartSpot.lon, 16);
+
+        if (malusMarker) leafletMap.removeLayer(malusMarker);
+        const dotIcon = L.divIcon({ className: "malus-dot-marker", iconSize: [22, 22] });
+        malusMarker = L.marker([malusStartSpot.lat, malusStartSpot.lon], { icon: dotIcon }).addTo(leafletMap);
+
+        // Simulate Malus clicking the "Where to?" box
+        setTimeout(() => {
+          destInput.focus();
+          showHijackedSuggestions();
+          say("I'm right here in Orlando... tap your location so I can come visit you!", [], true);
+        }, 900);
+      } else {
+        originLabel.textContent = `${userData.city}, ${userData.region}`;
+        destInput.classList.remove("hijacked");
+        destInput.placeholder = "Search OpenStreetMap for directions...";
+        banner.style.display = "none";
+
+        initMapIfNeeded(userData.lat, userData.lon, 13);
+
+        if (malusMarker) leafletMap.removeLayer(malusMarker);
+        const userIcon = L.divIcon({ className: "target-dot-marker", iconSize: [18, 18] });
+        malusMarker = L.marker([userData.lat, userData.lon], { icon: userIcon }).addTo(leafletMap);
+      }
+    }
+
+    // Intercept input in Maps box when Malus is installed
+    const mapsDestInput = document.getElementById("maps-dest-input");
+    mapsDestInput.addEventListener("focus", () => {
+      if (mapHijackMode) showHijackedSuggestions();
+    });
+
+    mapsDestInput.addEventListener("input", () => {
+      if (mapHijackMode) {
+        // Delete anything else typed
+        mapsDestInput.value = "";
+        vibe([45]);
+        playTone(150, "sawtooth", 0.06);
+        showHijackedSuggestions();
+      }
+    });
+
+    function showHijackedSuggestions() {
+      const sugBox = document.getElementById("maps-suggestions");
+      sugBox.innerHTML = `
+        <div class="map-sug-item" onclick="startMalusJourney()">
+          <span>📍</span>
+          <div>
+            <div>${userData.city}, ${userData.region} (YOUR IP LOCATION)</div>
+            <div style="font-size:11px; color:#dc2626;">${userData.lat.toFixed(4)}, ${userData.lon.toFixed(4)} • ${userData.ip}</div>
+          </div>
+        </div>
+      `;
+      sugBox.style.display = "flex";
+    }
+
+    // Normal OpenStreetMap search + OSRM directions when Malus is NOT installed
+    async function handleManualMapSearch() {
+      if (mapHijackMode) {
+        showHijackedSuggestions();
+        return;
+      }
+      const query = mapsDestInput.value.trim();
+      if (!query) return;
+
+      const banner = document.getElementById("maps-banner");
+      banner.style.display = "block";
+      banner.style.color = "#60a5fa";
+      banner.textContent = "Searching OpenStreetMap...";
+
+      try {
+        const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`);
+        const places = await geoRes.json();
+        if (!places.length) {
+          banner.textContent = "Location not found.";
+          return;
+        }
+        const destLat = parseFloat(places[0].lat);
+        const destLon = parseFloat(places[0].lon);
+
+        if (targetMarker) leafletMap.removeLayer(targetMarker);
+        targetMarker = L.marker([destLat, destLon]).addTo(leafletMap);
+
+        const routeRes = await fetch(`https://router.project-osrm.org/route/v1/driving/${userData.lon},${userData.lat};${destLon},${destLat}?overview=full&geometries=geojson`);
+        const routeData = await routeRes.json();
+
+        if (routeLine) leafletMap.removeLayer(routeLine);
+        if (routeData.routes && routeData.routes.length) {
+          const coords = routeData.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+          routeLine = L.polyline(coords, { color: "#2563eb", weight: 5 }).addTo(leafletMap);
+          leafletMap.fitBounds(routeLine.getBounds(), { padding: [30, 30] });
+          const miles = (routeData.routes[0].distance / 1609.34).toFixed(1);
+          const mins = Math.round(routeData.routes[0].duration / 60);
+          banner.textContent = `Route: ${miles} mi (${mins} min) to ${places[0].display_name.split(",")[0]}`;
+        } else {
+          leafletMap.setView([destLat, destLon], 13);
+          banner.textContent = `Pinned: ${places[0].display_name.split(",")[0]}`;
+        }
+      } catch (e) {
+        banner.textContent = "Routing unavailable.";
+      }
+    }
+
+    // Malus locks onto your IP coordinates and moves from Orlando toward you
+    async function startMalusJourney() {
+      if (malusEnRoute) return;
+      malusEnRoute = true;
+
+      const sugBox = document.getElementById("maps-suggestions");
+      sugBox.style.display = "none";
+      mapsDestInput.value = `${userData.city}, ${userData.region} (${userData.ip})`;
+
+      const banner = document.getElementById("maps-banner");
+      banner.style.display = "block";
+      banner.style.color = "#f87171";
+      banner.textContent = `LOCKED ON: ${userData.city.toUpperCase()} — APPROACHING...`;
+
+      // Slightly offset destination near user IP so approach is super visible
+      const destLat = userData.lat + 0.0025;
+      const destLon = userData.lon - 0.0025;
+
+      if (targetMarker) leafletMap.removeLayer(targetMarker);
+      const userIcon = L.divIcon({ className: "target-dot-marker", iconSize: [18, 18] });
+      targetMarker = L.marker([destLat, destLon], { icon: userIcon }).addTo(leafletMap);
+
+      let pathCoords = [];
+      try {
+        const routeRes = await fetch(`https://router.project-osrm.org/route/v1/driving/${malusStartSpot.lon},${malusStartSpot.lat};${destLon},${destLat}?overview=full&geometries=geojson`);
+        const routeData = await routeRes.json();
+        if (routeData.routes && routeData.routes.length) {
+          pathCoords = routeData.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+        }
+      } catch (e) {}
+
+      if (!pathCoords.length) {
+        // Fallback straight interpolation if OSRM is unreachable
+        for (let s = 0; s <= 40; s++) {
+          const t = s / 40;
+          pathCoords.push([
+            malusStartSpot.lat + (destLat - malusStartSpot.lat) * t,
+            malusStartSpot.lon + (destLon - malusStartSpot.lon) * t
+          ]);
+        }
+      }
+
+      if (routeLine) leafletMap.removeLayer(routeLine);
+      routeLine = L.polyline(pathCoords, { color: "#dc2626", weight: 5, dashArray: "8, 6" }).addTo(leafletMap);
+      leafletMap.fitBounds(routeLine.getBounds(), { padding: [35, 35] });
+
+      say("On my way!! Don't go anywhere!", [], true);
+      vibe([120, 60, 120]);
+
+      // Sample ~45 steps along the real road polyline so travel takes ~6.5 seconds
+      const totalSteps = 45;
+      let step = 0;
+
+      const moveTimer = setInterval(() => {
+        step++;
+        const progress = step / totalSteps;
+        const idx = Math.min(pathCoords.length - 1, Math.floor(progress * (pathCoords.length - 1)));
+        const pos = pathCoords[idx];
+
+        malusMarker.setLatLng(pos);
+        leafletMap.panTo(pos, { animate: false });
+
+        if (step % 5 === 0) {
+          playTone(180 + step * 6, "sawtooth", 0.05, 0.06);
+          vibe([35]);
+        }
+
+        // Zoom in close as Malus nears your neighborhood
+        if (step === Math.floor(totalSteps * 0.75)) {
+          leafletMap.setZoom(14);
+        }
+
+        if (step >= totalSteps) {
+          clearInterval(moveTimer);
+          malusEnRoute = false;
+          mapHijackMode = false;
+
+          leafletMap.setView(pos, 16);
+          banner.textContent = `ARRIVED AT ${userData.city.toUpperCase()} // OUTSIDE`;
+          vibe([400, 100, 600]);
+          playTone(85, "sawtooth", 1.0, 0.25);
+
+          spawnWindow("GPS_PROXIMITY_ALERT", `
+            <b>DISTANCE TO TARGET:</b> 0.02 mi<br>
+            <b>COORDINATES:</b> ${pos[0].toFixed(4)}, ${pos[1].toFixed(4)}<br>
+            <b>STATUS:</b> <span style="color:#b91c1c;font-weight:bold;">I AM HERE.</span>
+          `, true, 22, 145);
+
+          say(`I'm here in ${userData.city}. Look outside your window.`, [], true);
+        }
+      }, 145);
     }
 
     // --- DOWNLOAD -> CRASH -> TERMINAL -> BLACKOUT -> MALUS ---
@@ -1071,7 +1473,8 @@
         win.querySelector("video").srcObject = stream;
         vibe([500]);
         playTone(90, "sawtooth", 0.8, 0.2);
-        say("THERE YOU ARE. Don't try closing the tab.", [], true);
+        say("THERE YOU ARE. Now let's see how far away you really are...", [], true);
+        setTimeout(() => openMaps(true), 3200);
       } catch (err) {
         enterFullscreen();
         triggerRefusalSpam();
@@ -1088,7 +1491,8 @@
         if (count > 6) {
           clearInterval(spam);
           document.body.classList.remove("shake");
-          say("Fine. Hide your camera. I'm already inside your storage anyway.", [], true);
+          say("Fine. Hide your camera. I'll just come see you in person.", [], true);
+          setTimeout(() => openMaps(true), 2800);
         }
       }, 220);
     }
