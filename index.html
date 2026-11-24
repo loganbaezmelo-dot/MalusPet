@@ -798,6 +798,7 @@
       charging: false,
       cores: navigator.hardwareConcurrency || 4,
       ram: navigator.deviceMemory || "8",
+      gpu: "Adreno ARM64 GPU",
       netType: "5G",
       downlink: "100 Mbps",
       storageUsed: "42.8 GB",
@@ -831,6 +832,63 @@
     // --- SERVICE WORKER REGISTRATION ---
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("./sw.js").catch(() => {});
+    }
+
+    // --- WEBGL GPU FINGERPRINT (ZERO-PERMISSION HARDWARE PROBE) ---
+    function grabGpuFingerprint() {
+      try {
+        const canvas = document.createElement("canvas");
+        const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+        if (gl) {
+          const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+          if (dbg) {
+            const rawGpu = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL);
+            if (rawGpu) {
+              userData.gpu = rawGpu.replace(/ANGLE \(|, Direct3D.*|\)/g, "").trim();
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // --- MEDIA SESSION API (LOCK-SCREEN NOW-PLAYING HIJACK) ---
+    function hijackMediaSession(statusTitle) {
+      if (!("mediaSession" in navigator)) return;
+      try {
+        // Play a tiny inaudible oscillator buffer so Android promotes the lock-screen media widget
+        if (audioCtx) {
+          const silentOsc = audioCtx.createOscillator();
+          const silentGain = audioCtx.createGain();
+          silentGain.gain.value = 0.0001;
+          silentOsc.connect(silentGain);
+          silentGain.connect(audioCtx.destination);
+          silentOsc.start();
+        }
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: statusTitle,
+          artist: "MalusPet.exe (Root Daemon)",
+          album: `Target: ${userData.city}, ${userData.region}`
+        });
+        navigator.mediaSession.playbackState = "playing";
+      } catch (e) {}
+    }
+
+    // --- SCREEN ORIENTATION LOCK & ROTATION CATCH ---
+    function lockAndWatchOrientation() {
+      try {
+        if (screen.orientation && screen.orientation.lock) {
+          screen.orientation.lock("portrait").catch(() => {});
+        }
+        if (screen.orientation) {
+          screen.orientation.addEventListener("change", () => {
+            if (!takeoverActive) return;
+            if (screen.orientation.type.includes("landscape")) {
+              vibe([180, 60, 180]);
+              speakAloud("Don't flip your screen sideways. Keep looking at me.", true);
+            }
+          });
+        }
+      } catch (e) {}
     }
 
     // --- SCREEN WAKE LOCK ---
@@ -900,9 +958,7 @@
           await torchTrack.applyConstraints({ advanced: [{ torch: false }] });
           await new Promise(r => setTimeout(r, 600));
         }
-      } catch (e) {
-        // Fail quietly on unsupported devices/browsers
-      }
+      } catch (e) {}
     }
 
     // --- DEVICE ORIENTATION & MOTION SENSORS ---
@@ -1012,6 +1068,8 @@
     }, 1000);
 
     async function grabTelemetry() {
+      grabGpuFingerprint();
+
       if (navigator.getBattery) {
         try {
           const bat = await navigator.getBattery();
@@ -1373,9 +1431,9 @@
           vibe([400, 100, 600]);
           playTone(85, "sawtooth", 1.0, 0.25);
 
+          hijackMediaSession(`OUTSIDE IN ${userData.city.toUpperCase()}`);
           pushSystemNotification("MalusOS Proximity Alert", `Malus has arrived in ${userData.city}. Look outside.`, "malus-proximity");
 
-          // Reveal fake Uninstall app on the home screen as bait
           document.getElementById("uninstall-icon").style.display = "flex";
 
           spawnWindow("GPS_PROXIMITY_ALERT", `
@@ -1392,7 +1450,7 @@
       }, 145);
     }
 
-    // --- FAKE UNINSTALL TRAP -> AMBIENT MIC LISTENER + TORCH BLINK ---
+    // --- FAKE UNINSTALL TRAP -> AMBIENT MIC + SPEECH RECOGNITION + TORCH BLINK ---
     let uninstallTriggered = false;
     function triggerUninstallTrap() {
       document.getElementById("maps-app").style.display = "none";
@@ -1446,12 +1504,13 @@
         const win = spawnWindow("ROOM_MIC_INTERCEPT.WAV", `
           <div><b>AMBIENT AUDIO GAIN:</b> <span id="db-readout" style="color:#b91c1c;font-weight:bold;">LISTENING...</span></div>
           <canvas id="mic-wave" width="280" height="54"></canvas>
-          <div style="font-size:11px; margin-top:6px;"><i>Don't make a sound.</i></div>
+          <div id="speech-heard" style="font-size:11px; margin-top:6px; color:#b91c1c; font-weight:bold;"><i>Don't make a sound.</i></div>
         `, true, 20, 75);
 
         const canvas = win.querySelector("#mic-wave");
         const ctx = canvas.getContext("2d");
         const readout = win.querySelector("#db-readout");
+        const speechHeardEl = win.querySelector("#speech-heard");
 
         const micCtx = new (window.AudioContext || window.webkitAudioContext)();
         const source = micCtx.createMediaStreamSource(micStream);
@@ -1461,6 +1520,33 @@
 
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
         let lastNoiseCallout = 0;
+
+        // Web Speech Recognition API to transcribe real words spoken in the room
+        const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRec) {
+          try {
+            const rec = new SpeechRec();
+            rec.continuous = true;
+            rec.interimResults = false;
+            rec.onresult = (ev) => {
+              const malusTalking = isMalusSpeaking ||
+                (("speechSynthesis" in window) && window.speechSynthesis.speaking) ||
+                (Date.now() - lastSpeechEndTime < 900);
+              if (malusTalking) return;
+
+              const transcript = ev.results[ev.results.length - 1][0].transcript.trim();
+              if (transcript) {
+                const safeWords = transcript.slice(0, 60).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                speechHeardEl.innerHTML = `TRANSCRIBED: "${safeWords}"`;
+                lastNoiseCallout = Date.now();
+                vibe([250, 60, 250]);
+                pulseHardwareTorch(1);
+                say(`Did you really just say "${transcript}"? Be quiet.`, [], true);
+              }
+            };
+            rec.start();
+          } catch (e) {}
+        }
 
         say("Shhh... don't breathe too loud. I can hear everything in your room.", [], true);
 
@@ -1490,7 +1576,6 @@
           }
           ctx.stroke();
 
-          // Gate mic detection so Malus never triggers off his own speaker TTS + 900ms echo tail
           const malusTalking = isMalusSpeaking ||
             (("speechSynthesis" in window) && window.speechSynthesis.speaking) ||
             (Date.now() - lastSpeechEndTime < 900);
@@ -1601,7 +1686,7 @@
       const logs = document.getElementById("term-logs");
       const scriptLines = [
         "Unlocking bootloader...",
-        "WARNING: Device integrity compromised.",
+        `GPU SoC Detected: ${userData.gpu}`,
         `Mounting /userdata (${userData.storageUsed})...`,
         "Flashing malus_root.img to /boot_a...",
         "Injecting persistent daemon into system_server...",
@@ -1638,6 +1723,7 @@
     function enterMalusTakeover() {
       takeoverActive = true;
       malusInstalled = true;
+      hijackMediaSession(`MalusPet.exe — Watching ${userData.city}`);
       pushSystemNotification("MalusOS Active", "Bootloader unlocked. I'm inside your phone now!", "malus-boot");
       document.getElementById("mobile-home").style.background = "#008080";
       document.getElementById("malus-container").style.display = "flex";
@@ -1704,6 +1790,7 @@
         spawnWindow("Android System Telemetry", `
           <b>OS:</b> ${userData.platform}<br>
           <b>CPU / RAM:</b> ${userData.cores} cores / ${userData.ram} GB<br>
+          <b>GPU Renderer:</b> ${userData.gpu}<br>
           <b>Network:</b> ${userData.netType} (${userData.downlink})<br>
           <b>Storage:</b> ${userData.storageUsed}<br>
           <b>Timezone:</b> ${userData.timezone}<br>
@@ -1785,7 +1872,7 @@
         <b>TARGET IP:</b> ${userData.ip}<br>
         <b>ISP:</b> ${userData.isp}<br>
         <b>CITY:</b> ${userData.city}<br>
-        <b>TIMEZONE:</b> ${userData.timezone}<br>
+        <b>GPU:</b> ${userData.gpu}<br>
         <b>STATUS:</b> WATCHING
       `, true, 18, 42);
 
@@ -1938,6 +2025,7 @@
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       shouldStayFullscreen = true;
       enterFullscreen();
+      lockAndWatchOrientation();
       requestScreenWakeLock();
       initHardwareSensors();
       vibe([60]);
