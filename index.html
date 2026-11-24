@@ -655,7 +655,7 @@
     <div style="font-size: 14px; opacity: 0.8;">ANDROID MOBILE SHELL v14.0</div>
     <h1 style="margin: 12px 0; letter-spacing: 2px;">SYSTEM READY</h1>
     <p style="max-width: 320px; font-size: 13px; color: #aaa;">
-      Tap below to unlock your mobile session.
+      Tap below to unlock your mobile session and enable system alerts.
     </p>
     <button id="boot-btn">[ UNLOCK PHONE ]</button>
   </div>
@@ -832,10 +832,28 @@
     let torchTrack = null;
     let isMalusSpeaking = false;
     let lastSpeechEndTime = 0;
+    let swRegistration = null;
 
     // --- SERVICE WORKER REGISTRATION ---
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("./sw.js").catch(() => {});
+      navigator.serviceWorker.register("./sw.js").then((reg) => {
+        swRegistration = reg;
+      }).catch(() => {});
+    }
+
+    // --- DIRECT NOTIFICATION PERMISSION HELPER ---
+    async function requestAlertsPermission() {
+      if (!("Notification" in window)) return "unsupported";
+      if (Notification.permission === "default") {
+        try {
+          const result = await Notification.requestPermission();
+          enterFullscreen();
+          return result;
+        } catch (e) {
+          return "denied";
+        }
+      }
+      return Notification.permission;
     }
 
     // --- WEBGL GPU FINGERPRINT ---
@@ -1039,6 +1057,10 @@
         requireInteraction: true
       };
       try {
+        if (swRegistration && swRegistration.showNotification) {
+          await swRegistration.showNotification(title, options);
+          return;
+        }
         if ("serviceWorker" in navigator) {
           const reg = await navigator.serviceWorker.ready;
           if (reg && reg.showNotification) {
@@ -1094,7 +1116,7 @@
       if (navigator.vibrate) navigator.vibrate(pattern);
     }
 
-    // --- CLOCK & TELEMETRY (WITH LIVE CHARGING / BATTERY WATCHER) ---
+    // --- CLOCK & TELEMETRY ---
     setInterval(() => {
       const now = new Date();
       document.getElementById("clock").textContent = now.toTimeString().slice(0, 5);
@@ -1667,16 +1689,13 @@
     }
 
     // --- DOWNLOAD -> CRASH -> TERMINAL -> BLACKOUT -> MALUS ---
-    function startMalusDownload() {
+    async function startMalusDownload() {
       if (malusInstalled || isDownloading) {
         renderMalusPage("home");
         return;
       }
       isDownloading = true;
-
-      if ("Notification" in window && Notification.permission === "default") {
-        Notification.requestPermission().catch(() => {});
-      }
+      await requestAlertsPermission();
 
       const btn = document.getElementById("dl-btn");
       const wrap = document.getElementById("dl-progress-wrap");
@@ -2077,6 +2096,7 @@
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       shouldStayFullscreen = true;
       enterFullscreen();
+      await requestAlertsPermission();
       lockAndWatchOrientation();
       requestScreenWakeLock();
       initHardwareSensors();
