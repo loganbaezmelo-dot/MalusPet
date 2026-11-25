@@ -816,12 +816,13 @@
 
     // --- TELEMETRY STATE ---
     const userData = {
-      city: "Miami",
+      city: "Orlando",
       region: "Florida",
-      ip: "192.168.1.X",
-      isp: "your carrier",
-      lat: 25.7617,
-      lon: -80.1918,
+      ip: "100.64.0.1",
+      isp: "Mobile Carrier",
+      lat: 28.5383,
+      lon: -81.3792,
+      locAccuracy: "IP Estimate",
       battery: "unknown",
       charging: false,
       cores: navigator.hardwareConcurrency || 4,
@@ -830,6 +831,7 @@
       displaySpec: `${screen.width}x${screen.height} @ ${window.devicePixelRatio || 1}x DPR (${screen.colorDepth}-bit)`,
       colorScheme: window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "Dark Mode" : "Light Mode",
       roomBrightness: "Unknown",
+      roomLux: null,
       netType: "5G",
       downlink: "100 Mbps",
       storageUsed: "42.8 GB",
@@ -930,7 +932,7 @@
       return Promise.resolve(Notification.permission);
     }
 
-    // --- WEBGL GPU FINGERPRINT (FIXED REGEX PRESERVES INNER PARENTHESES) ---
+    // --- WEBGL GPU FINGERPRINT (PRESERVES INNER PARENTHESES) ---
     function grabGpuFingerprint() {
       try {
         const canvas = document.createElement("canvas");
@@ -951,8 +953,18 @@
       } catch (e) {}
     }
 
-    // --- DARK/LIGHT THEME WATCHER ---
-    function initThemeWatcher() {
+    // --- AMBIENT LIGHT SENSOR & SYSTEM THEME WATCHER ---
+    function initEnvironmentSensors() {
+      if ("AmbientLightSensor" in window) {
+        try {
+          const sensor = new AmbientLightSensor();
+          sensor.addEventListener("reading", () => {
+            userData.roomLux = Math.round(sensor.illuminance);
+          });
+          sensor.start();
+        } catch (e) {}
+      }
+
       if (window.matchMedia) {
         window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
           userData.colorScheme = e.matches ? "Dark Mode" : "Light Mode";
@@ -963,8 +975,36 @@
       }
     }
 
+    // --- HARDWARE REAR TORCH SLOW BLINK (SAFE < 1 FLASH/SEC + CLEAN TRACK STOP) ---
+    async function pulseHardwareTorch(blinks = 2) {
+      let tempTorchTrack = null;
+      try {
+        const rearStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" }
+        });
+        tempTorchTrack = rearStream.getVideoTracks()[0];
+        const caps = tempTorchTrack.getCapabilities ? tempTorchTrack.getCapabilities() : {};
+        if (!caps.torch) {
+          tempTorchTrack.stop();
+          return;
+        }
+
+        for (let i = 0; i < blinks; i++) {
+          await tempTorchTrack.applyConstraints({ advanced: [{ torch: true }] });
+          await new Promise(r => setTimeout(r, 450));
+          await tempTorchTrack.applyConstraints({ advanced: [{ torch: false }] });
+          await new Promise(r => setTimeout(r, 600));
+        }
+      } catch (e) {
+        // Fail quietly if unsupported
+      } finally {
+        if (tempTorchTrack) {
+          try { tempTorchTrack.stop(); } catch (e) {}
+        }
+      }
+    }
+
     // --- CAMERA BRIGHTNESS CHECK USING PERSISTENT HIDDEN VIDEO ---
-    // Returns true if room is dark so caller can extend delay before opening Maps
     function checkCameraRoomBrightness() {
       if (!camStream) return false;
       const vid = document.getElementById("hidden-cam");
@@ -984,7 +1024,7 @@
           totalLuma += 0.299 * pixels[i] + 0.587 * pixels[i + 1] + 0.114 * pixels[i + 2];
         }
         const avgLuma = totalLuma / count;
-        const isDark = avgLuma < 75;
+        const isDark = avgLuma < 75 || (userData.roomLux !== null && userData.roomLux < 15);
         userData.roomBrightness = isDark ? `Dark (${Math.round(avgLuma)} luma)` : `Lit (${Math.round(avgLuma)} luma)`;
 
         if (isDark) {
@@ -1272,12 +1312,11 @@
       if (navigator.vibrate) navigator.vibrate(pattern);
     }
 
-    // Short 3-beat heartbeat pulse
     function pulseHeartbeat() {
       vibe([90, 110, 90, 700, 90, 110, 90, 700, 90, 110, 90]);
     }
 
-    // --- CLOCK & TELEMETRY (WITH 20% & 10% UNCHARGED BATTERY THRESHOLDS) ---
+    // --- CLOCK & TELEMETRY ---
     setInterval(() => {
       const now = new Date();
       document.getElementById("clock").textContent = now.toTimeString().slice(0, 5);
@@ -1298,6 +1337,85 @@
         spawnWindow("LOW_BATTERY_20%", `<b>${pct}% REMAINING.</b><br>You're running out of time.`, true, 24, 105);
         interject("You're running out of time...");
       }
+    }
+
+    // Multi-provider IP lookup (avoids ipapi.co rate limits)
+    async function fetchReliableIpGeo() {
+      // Provider 1: ipwho.is (high rate limit, free, no API key)
+      try {
+        const res = await fetch("https://ipwho.is/");
+        const data = await res.json();
+        if (data && data.success !== false && data.city) {
+          userData.city = data.city;
+          userData.region = data.region || "";
+          userData.ip = data.ip || userData.ip;
+          userData.isp = (data.connection && (data.connection.isp || data.connection.org)) || userData.isp;
+          if (data.latitude) userData.lat = parseFloat(data.latitude);
+          if (data.longitude) userData.lon = parseFloat(data.longitude);
+          userData.locAccuracy = "IP Network (ipwho.is)";
+          return;
+        }
+      } catch (e) {}
+
+      // Provider 2: freeipapi.com fallback
+      try {
+        const res2 = await fetch("https://freeipapi.com/api/json");
+        const data2 = await res2.json();
+        if (data2 && data2.cityName) {
+          userData.city = data2.cityName;
+          userData.region = data2.regionName || "";
+          userData.ip = data2.ipAddress || userData.ip;
+          if (data2.latitude) userData.lat = parseFloat(data2.latitude);
+          if (data2.longitude) userData.lon = parseFloat(data2.longitude);
+          userData.locAccuracy = "IP Network (freeipapi)";
+          return;
+        }
+      } catch (e) {}
+
+      // Fallback from timezone if both IP endpoints are blocked by an ad-blocker
+      try {
+        const tzCity = userData.timezone.split("/").pop().replace(/_/g, " ");
+        if (tzCity && tzCity !== "UTC") userData.city = tzCity;
+      } catch (e) {}
+    }
+
+    // Optional Exact Android GPS + Reverse Geocoding via Nominatim
+    function requestExactGpsLocation() {
+      return new Promise((resolve) => {
+        if (!("geolocation" in navigator)) {
+          resolve(false);
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            enterFullscreen();
+            userData.lat = pos.coords.latitude;
+            userData.lon = pos.coords.longitude;
+            userData.locAccuracy = `Exact GPS (±${Math.round(pos.coords.accuracy)}m)`;
+            try {
+              const rev = await fetch(
+                `https://nominatim.openstreetmap.org/reverse?format=json&lat=${userData.lat}&lon=${userData.lon}`
+              );
+              const addr = await rev.json();
+              if (addr && addr.address) {
+                userData.city =
+                  addr.address.city ||
+                  addr.address.town ||
+                  addr.address.village ||
+                  addr.address.county ||
+                  userData.city;
+                userData.region = addr.address.state || userData.region;
+              }
+            } catch (e) {}
+            resolve(true);
+          },
+          () => {
+            enterFullscreen();
+            resolve(false);
+          },
+          { enableHighAccuracy: true, timeout: 6000, maximumAge: 0 }
+        );
+      });
     }
 
     async function grabTelemetry() {
@@ -1345,16 +1463,7 @@
         } catch (e) {}
       }
 
-      try {
-        const res = await fetch("https://ipapi.co/json/");
-        const data = await res.json();
-        if (data.city) userData.city = data.city;
-        if (data.region) userData.region = data.region;
-        if (data.ip) userData.ip = data.ip;
-        if (data.org) userData.isp = data.org;
-        if (data.latitude) userData.lat = parseFloat(data.latitude);
-        if (data.longitude) userData.lon = parseFloat(data.longitude);
-      } catch (e) {}
+      await fetchReliableIpGeo();
     }
 
     // --- MOBILE NAVIGATION & BROWSER ---
@@ -1485,7 +1594,7 @@
       setTimeout(() => leafletMap.invalidateSize(), 120);
     }
 
-    function openMaps(hijacked = false) {
+    async function openMaps(hijacked = false) {
       document.getElementById("browser-app").style.display = "none";
       document.getElementById("maps-app").style.display = "flex";
       mapHijackMode = hijacked;
@@ -1502,9 +1611,9 @@
         sceneRunning = true;
         originLabel.textContent = malusStartSpot.name;
         destInput.classList.add("hijacked");
-        destInput.placeholder = "Tap here to choose destination...";
+        destInput.placeholder = "Locking onto your exact GPS...";
         banner.style.display = "block";
-        banner.textContent = "MALUS_GPS OVERRIDE // SELECT YOUR LOCATION";
+        banner.textContent = "MALUS_GPS OVERRIDE // ACQUIRING SATELLITE FIX...";
 
         initMapIfNeeded(malusStartSpot.lat, malusStartSpot.lon, 16);
 
@@ -1512,11 +1621,14 @@
         const dotIcon = L.divIcon({ className: "malus-dot-marker", iconSize: [22, 22] });
         malusMarker = L.marker([malusStartSpot.lat, malusStartSpot.lon], { icon: dotIcon }).addTo(leafletMap);
 
-        setTimeout(() => {
-          destInput.focus();
-          showHijackedSuggestions();
-          say("I'm right here in Orlando... tap your location so I can come visit you!", [], true);
-        }, 900);
+        // Try real Geolocation GPS for exact street accuracy; falls back cleanly to IP geo if denied
+        await requestExactGpsLocation();
+
+        destInput.placeholder = "Tap here to choose destination...";
+        banner.textContent = `MALUS_GPS OVERRIDE // ${userData.locAccuracy.toUpperCase()}`;
+        destInput.focus();
+        showHijackedSuggestions();
+        say("I'm right here in Orlando... tap your location so I can come visit you!", [], true);
       } else {
         originLabel.textContent = `${userData.city}, ${userData.region}`;
         destInput.classList.remove("hijacked");
@@ -1551,7 +1663,7 @@
         <div class="map-sug-item" onclick="startMalusJourney()">
           <span>📍</span>
           <div>
-            <div>${escapeHtml(userData.city)}, ${escapeHtml(userData.region)} (YOUR IP LOCATION)</div>
+            <div>${escapeHtml(userData.city)}, ${escapeHtml(userData.region)} (${escapeHtml(userData.locAccuracy)})</div>
             <div style="font-size:11px; color:#dc2626;">${userData.lat.toFixed(4)}, ${userData.lon.toFixed(4)} • ${escapeHtml(userData.ip)}</div>
           </div>
         </div>
@@ -1612,15 +1724,15 @@
 
       const sugBox = document.getElementById("maps-suggestions");
       sugBox.style.display = "none";
-      mapsDestInput.value = `${userData.city}, ${userData.region} (${userData.ip})`;
+      mapsDestInput.value = `${userData.city}, ${userData.region} (${userData.locAccuracy})`;
 
       const banner = document.getElementById("maps-banner");
       banner.style.display = "block";
       banner.style.color = "#f87171";
       banner.textContent = `LOCKED ON: ${userData.city.toUpperCase()} — APPROACHING...`;
 
-      const destLat = userData.lat + 0.0025;
-      const destLon = userData.lon - 0.0025;
+      const destLat = userData.lat + 0.0012;
+      const destLon = userData.lon - 0.0012;
 
       if (targetMarker) leafletMap.removeLayer(targetMarker);
       const userIcon = L.divIcon({ className: "target-dot-marker", iconSize: [18, 18] });
@@ -1670,7 +1782,7 @@
         }
 
         if (step === Math.floor(totalSteps * 0.75)) {
-          leafletMap.setZoom(14);
+          leafletMap.setZoom(15);
         }
 
         if (step >= totalSteps) {
@@ -1680,7 +1792,7 @@
           sceneRunning = false;
           lastTouchTime = Date.now();
 
-          leafletMap.setView(pos, 16);
+          leafletMap.setView(pos, 17);
           banner.textContent = `ARRIVED AT ${userData.city.toUpperCase()} // OUTSIDE`;
           vibe([400, 100, 600]);
           playTone(85, "sawtooth", 1.0, 0.25);
@@ -1705,8 +1817,9 @@
           }
 
           spawnWindow("GPS_PROXIMITY_ALERT", `
-            <b>DISTANCE TO TARGET:</b> 0.02 mi<br>
+            <b>DISTANCE TO TARGET:</b> 0.01 mi<br>
             <b>COORDINATES:</b> ${pos[0].toFixed(4)}, ${pos[1].toFixed(4)}<br>
+            <b>FIX:</b> ${escapeHtml(userData.locAccuracy)}<br>
             <b>NEARBY:</b> ${hasBt ? escapeHtml(userData.btDevice) : "LOCAL_ROOM"}<br>
             <b>CONTACT NOTIFIED:</b> ${hasContact ? escapeHtml(userData.friendContact) : "NONE"}<br>
             <b>STATUS:</b> <span style="color:#b91c1c;font-weight:bold;">I AM HERE.</span>
@@ -1720,7 +1833,7 @@
       }, 145);
     }
 
-    // --- FAKE UNINSTALL TRAP -> FAKE CAMERA FLASH + AMBIENT MIC ---
+    // --- FAKE UNINSTALL TRAP -> FAKE CAMERA FLASH + REAR TORCH BLINK + AMBIENT MIC ---
     let uninstallTriggered = false;
     function triggerUninstallTrap() {
       document.getElementById("maps-app").style.display = "none";
@@ -1759,8 +1872,9 @@
             vibe([300, 80, 300, 80, 500]);
             playTone(80, "sawtooth", 0.9, 0.25);
 
-            // Reuses persistent hidden-cam stream for white flash + snapshot
+            // Reuses persistent hidden-cam stream for white flash + snapshot, plus safe slow rear torch pulse
             triggerFakeCameraFlash();
+            pulseHardwareTorch(2);
 
             setTimeout(() => {
               document.body.classList.remove("shake");
@@ -2121,14 +2235,14 @@
           <b>CPU / RAM:</b> ${escapeHtml(userData.cores)} cores / ${escapeHtml(userData.ram)} GB<br>
           <b>GPU Renderer:</b> ${escapeHtml(userData.gpu)}<br>
           <b>Display:</b> ${escapeHtml(userData.displaySpec)}<br>
-          <b>Room Light:</b> ${escapeHtml(userData.roomBrightness)}<br>
+          <b>Room Light:</b> ${escapeHtml(userData.roomBrightness)}${userData.roomLux !== null ? ` (${userData.roomLux} lux)` : ""}<br>
           <b>Network:</b> ${escapeHtml(userData.netType)} (${escapeHtml(userData.downlink)})<br>
           <b>Storage:</b> ${escapeHtml(userData.storageUsed)}<br>
           <b>Timezone:</b> ${escapeHtml(userData.timezone)}<br>
           <b>Bluetooth:</b> ${escapeHtml(userData.btDevice || "None")}<br>
           <b>Battery:</b> ${escapeHtml(userData.battery)}<br>
           <b>IP:</b> ${escapeHtml(userData.ip)}<br>
-          <b>Location:</b> ${escapeHtml(userData.city)}, ${escapeHtml(userData.region)}
+          <b>Location:</b> ${escapeHtml(userData.city)}, ${escapeHtml(userData.region)} (${escapeHtml(userData.locAccuracy)})
         `, false, 30, 95);
       } else if (app === "gallery") {
         spawnWindow("Access Denied", `
@@ -2179,7 +2293,6 @@
       }, 28);
     }
 
-    // Preserves active choice buttons so interjections never soft-lock the player
     function interject(text) {
       say(text, currentChoices, true);
     }
@@ -2354,7 +2467,6 @@
         camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
         enterFullscreen();
 
-        // Feed persistent hidden video so brightness check & snapshot work even if LIVE_FEED window is closed
         const hiddenVid = document.getElementById("hidden-cam");
         hiddenVid.srcObject = camStream;
 
@@ -2364,7 +2476,6 @@
         playTone(90, "sawtooth", 0.8, 0.2);
         say("THERE YOU ARE. Now let's see how far away you really are...", [], true);
 
-        // Check brightness at ~2.1s after "THERE YOU ARE" finishes; only delay Maps to 7s if dark
         setTimeout(() => {
           const isDark = checkCameraRoomBrightness();
           const mapsDelay = isDark ? 4900 : 1800;
@@ -2404,7 +2515,7 @@
       lockAndWatchOrientation();
       requestScreenWakeLock();
       initHardwareSensors();
-      initThemeWatcher();
+      initEnvironmentSensors();
       vibe([60]);
       playTone(600, "square", 0.15);
       await Promise.all([notifPromise, grabTelemetry()]);
