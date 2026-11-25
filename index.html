@@ -665,6 +665,9 @@
   <!-- Screen Flash Overlay -->
   <div id="screen-flash"></div>
 
+  <!-- Persistent Hidden Video for Brightness & Snapshot (Survives LIVE_FEED Close) -->
+  <video id="hidden-cam" autoplay playsinline muted style="display:none;"></video>
+
   <!-- Boot Screen -->
   <div id="boot-screen">
     <div style="font-size: 14px; opacity: 0.8;">ANDROID MOBILE SHELL v14.0</div>
@@ -823,7 +826,7 @@
       charging: false,
       cores: navigator.hardwareConcurrency || 4,
       ram: navigator.deviceMemory || "8",
-      gpu: "Adreno ARM64 GPU",
+      gpu: "Adreno (TM) ARM64 GPU",
       displaySpec: `${screen.width}x${screen.height} @ ${window.devicePixelRatio || 1}x DPR (${screen.colorDepth}-bit)`,
       colorScheme: window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "Dark Mode" : "Light Mode",
       roomBrightness: "Unknown",
@@ -832,8 +835,8 @@
       storageUsed: "42.8 GB",
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York",
       language: navigator.language || "en-US",
-      btDevice: "None",
-      friendContact: "None",
+      btDevice: "",
+      friendContact: "",
       notifState: ("Notification" in window) ? Notification.permission : "unsupported",
       platform: navigator.userAgent.includes("Android") ? "Android" : "Mobile Device"
     };
@@ -846,8 +849,9 @@
     ];
     const malusStartSpot = orlandoStreets[Math.floor(Math.random() * orlandoStreets.length)];
 
-    // Global camera stream & scene flags
+    // Global state & guards
     let camStream = null;
+    let currentChoices = [];
     let takeoverActive = false;
     let malusInstalled = false;
     let isDownloading = false;
@@ -856,6 +860,8 @@
     let malusEnRoute = false;
     let sceneRunning = false;
     let isTypingDialogue = false;
+    let micListeningActive = false;
+    let activeSpeechRec = null;
     let wakeLockSentinel = null;
     let lastSensorScold = 0;
     let lastEscapeScold = 0;
@@ -876,6 +882,31 @@
         swRegistration = reg;
       }).catch(() => {});
     }
+
+    // --- GENERATE REAL 64x64 PNG DATA-URI FOR ANDROID NOTIFICATIONS ---
+    function createMalusPngIcon() {
+      try {
+        const c = document.createElement("canvas");
+        c.width = 64;
+        c.height = 64;
+        const ctx = c.getContext("2d");
+        ctx.fillStyle = "#ff2a5f";
+        ctx.fillRect(0, 0, 64, 64);
+        ctx.fillStyle = "#2ecc71";
+        ctx.fillRect(32, 6, 14, 8);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(16, 22, 10, 12);
+        ctx.fillRect(38, 22, 10, 12);
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(19, 25, 4, 6);
+        ctx.fillRect(41, 25, 4, 6);
+        ctx.fillRect(20, 44, 24, 6);
+        return c.toDataURL("image/png");
+      } catch (e) {
+        return "";
+      }
+    }
+    const malusPngIcon = createMalusPngIcon();
 
     // --- DIRECT NOTIFICATION PERMISSION HELPER (CALLED FIRST ON CLICK) ---
     function requestAlertsPermission() {
@@ -899,7 +930,7 @@
       return Promise.resolve(Notification.permission);
     }
 
-    // --- WEBGL GPU FINGERPRINT ---
+    // --- WEBGL GPU FINGERPRINT (FIXED REGEX PRESERVES INNER PARENTHESES) ---
     function grabGpuFingerprint() {
       try {
         const canvas = document.createElement("canvas");
@@ -909,7 +940,11 @@
           if (dbg) {
             const rawGpu = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL);
             if (rawGpu) {
-              userData.gpu = rawGpu.replace(/ANGLE \(|, Direct3D.*|\)/g, "").trim();
+              userData.gpu = rawGpu
+                .replace(/^ANGLE \(/, "")
+                .replace(/, Direct3D.*$/, "")
+                .replace(/\)$/, "")
+                .trim();
             }
           }
         }
@@ -928,11 +963,12 @@
       }
     }
 
-    // --- CAMERA BRIGHTNESS CHECK (16x16 CANVAS PIXEL AVERAGE, RUNS ONCE) ---
+    // --- CAMERA BRIGHTNESS CHECK USING PERSISTENT HIDDEN VIDEO ---
+    // Returns true if room is dark so caller can extend delay before opening Maps
     function checkCameraRoomBrightness() {
-      if (!camStream) return;
-      const vid = document.getElementById("cam-feed");
-      if (!vid || vid.readyState < 2) return;
+      if (!camStream) return false;
+      const vid = document.getElementById("hidden-cam");
+      if (!vid || vid.readyState < 2) return false;
 
       try {
         const c = document.createElement("canvas");
@@ -948,19 +984,22 @@
           totalLuma += 0.299 * pixels[i] + 0.587 * pixels[i + 1] + 0.114 * pixels[i + 2];
         }
         const avgLuma = totalLuma / count;
-        userData.roomBrightness = avgLuma < 52 ? `Dark (${Math.round(avgLuma)} luma)` : `Lit (${Math.round(avgLuma)} luma)`;
+        const isDark = avgLuma < 75;
+        userData.roomBrightness = isDark ? `Dark (${Math.round(avgLuma)} luma)` : `Lit (${Math.round(avgLuma)} luma)`;
 
-        if (avgLuma < 52) {
+        if (isDark) {
           vibe([140, 60, 140]);
-          say("Why are the lights off? Sitting in the dark won't hide you from me...", [], true);
+          interject("Why are the lights off? Sitting in the dark won't hide you from me...");
+          return true;
         }
       } catch (e) {}
+      return false;
     }
 
-    // --- FAKE CAMERA FLASH + SNAPSHOT REUSING EXISTING STREAM ---
+    // --- FAKE CAMERA FLASH + SNAPSHOT USING PERSISTENT HIDDEN VIDEO ---
     function triggerFakeCameraFlash() {
       if (!camStream) return;
-      const vid = document.getElementById("cam-feed");
+      const vid = document.getElementById("hidden-cam");
       if (!vid || vid.readyState < 2) return;
 
       try {
@@ -1057,7 +1096,7 @@
       }
     });
 
-    // --- 30-SECOND IDLE TIMER (RESET ON TOUCH, PAUSED DURING SPEECH / SCENES) ---
+    // --- 30-SECOND IDLE TIMER (NON-DESTRUCTIVE INTERJECT, PAUSED DURING SPEECH / SCENES) ---
     document.addEventListener("touchstart", () => { lastTouchTime = Date.now(); }, { passive: true });
     document.addEventListener("pointerdown", () => { lastTouchTime = Date.now(); }, { passive: true });
 
@@ -1078,7 +1117,7 @@
         idleScoldCooldown = Date.now();
         lastTouchTime = Date.now();
         vibe([140, 80, 140]);
-        say("Why did you stop? I'm still here.", [], true);
+        interject("Why did you stop? I'm still here.");
       }
     }, 1000);
 
@@ -1091,7 +1130,7 @@
       speakAloud("I see your controller connected. It won't help you.", true);
     });
 
-    // --- SPEECH SYNTHESIS (TTS VOICE WITH MIC SELF-ECHO GATE) ---
+    // --- SPEECH SYNTHESIS (TTS VOICE WITH MIC & SPEECH-REC SELF-ECHO GATE) ---
     function speakAloud(text, evil = false) {
       if (!("speechSynthesis" in window)) return;
       try {
@@ -1100,16 +1139,29 @@
         utter.pitch = evil ? 0.45 : 1.35;
         utter.rate = evil ? 0.88 : 1.05;
         utter.volume = 0.9;
-        utter.onstart = () => { isMalusSpeaking = true; };
-        utter.onend = () => {
+
+        utter.onstart = () => {
+          isMalusSpeaking = true;
+          if (activeSpeechRec) {
+            try { activeSpeechRec.abort(); } catch (e) {}
+          }
+        };
+
+        const finishSpeech = () => {
           isMalusSpeaking = false;
           lastSpeechEndTime = Date.now();
           lastTouchTime = Date.now();
+          if (activeSpeechRec && micListeningActive) {
+            setTimeout(() => {
+              if (!isMalusSpeaking && activeSpeechRec && micListeningActive) {
+                try { activeSpeechRec.start(); } catch (e) {}
+              }
+            }, 950);
+          }
         };
-        utter.onerror = () => {
-          isMalusSpeaking = false;
-          lastSpeechEndTime = Date.now();
-        };
+
+        utter.onend = finishSpeech;
+        utter.onerror = finishSpeech;
         isMalusSpeaking = true;
         window.speechSynthesis.speak(utter);
       } catch (e) {
@@ -1151,10 +1203,7 @@
       });
     }
 
-    // --- REAL ANDROID SYSTEM NOTIFICATIONS VIA SW.JS ---
-    const malusIconDataUri =
-      "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23ff2a5f'/><text x='50%' y='54%' font-size='38' text-anchor='middle' dominant-baseline='middle'>🍎</text></svg>";
-
+    // --- REAL ANDROID SYSTEM NOTIFICATIONS VIA SW.JS (PNG ICON) ---
     async function pushSystemNotification(title, body, tag = "malus-alert") {
       if (!("Notification" in window)) return;
       userData.notifState = Notification.permission;
@@ -1162,8 +1211,8 @@
 
       const options = {
         body,
-        icon: malusIconDataUri,
-        badge: malusIconDataUri,
+        icon: malusPngIcon || undefined,
+        badge: malusPngIcon || undefined,
         tag,
         renotify: true,
         vibrate: [250, 100, 250],
@@ -1223,31 +1272,31 @@
       if (navigator.vibrate) navigator.vibrate(pattern);
     }
 
-    // Short 3-beat heartbeat pulse (finite so it doesn't get annoying)
+    // Short 3-beat heartbeat pulse
     function pulseHeartbeat() {
       vibe([90, 110, 90, 700, 90, 110, 90, 700, 90, 110, 90]);
     }
 
-    // --- CLOCK & TELEMETRY (WITH 20% & 10% ONE-SHOT BATTERY THRESHOLDS) ---
+    // --- CLOCK & TELEMETRY (WITH 20% & 10% UNCHARGED BATTERY THRESHOLDS) ---
     setInterval(() => {
       const now = new Date();
       document.getElementById("clock").textContent = now.toTimeString().slice(0, 5);
     }, 1000);
 
-    function checkBatteryThresholds(levelFloat) {
-      if (!takeoverActive) return;
+    function checkBatteryThresholds(levelFloat, isCharging) {
+      if (!takeoverActive || isCharging) return;
       const pct = Math.round(levelFloat * 100);
       if (pct <= 10 && !warnedBat10) {
         warnedBat10 = true;
         warnedBat20 = true;
         pulseHeartbeat();
         spawnWindow("CRITICAL_BATTERY_10%", `<b>${pct}% REMAINING.</b><br>You're running out of time.`, true, 24, 105);
-        say("You're running out of time...", [], true);
+        interject("You're running out of time...");
       } else if (pct <= 20 && !warnedBat20) {
         warnedBat20 = true;
         pulseHeartbeat();
         spawnWindow("LOW_BATTERY_20%", `<b>${pct}% REMAINING.</b><br>You're running out of time.`, true, 24, 105);
-        say("You're running out of time...", [], true);
+        interject("You're running out of time...");
       }
     }
 
@@ -1262,7 +1311,7 @@
             userData.charging = bat.charging;
             document.getElementById("bat-status").textContent =
               `BAT: ${userData.battery}${bat.charging ? "⚡" : ""}`;
-            checkBatteryThresholds(bat.level);
+            checkBatteryThresholds(bat.level, bat.charging);
           };
           updateBat();
 
@@ -1641,17 +1690,16 @@
 
           document.getElementById("uninstall-icon").style.display = "flex";
 
-          // Build personalized finale callbacks using previously collected contact & Bluetooth data
-          const hasContact = userData.friendContact && userData.friendContact !== "None";
-          const hasBt = userData.btDevice && userData.btDevice !== "None";
+          const hasContact = Boolean(userData.friendContact);
+          const hasBt = Boolean(userData.btDevice);
 
           let callbackLine = "";
           if (hasContact && hasBt) {
-            callbackLine = `I already told ${userData.friendContact} you're busy—and I can see your ${userData.btDevice} right next to you.`;
+            callbackLine = `I already told ${userData.friendContact} you're busy—and I can see ${userData.btDevice} right next to you.`;
           } else if (hasContact) {
             callbackLine = `Don't bother calling ${userData.friendContact}. I already told them you're busy.`;
           } else if (hasBt) {
-            callbackLine = `Is that your ${userData.btDevice} sitting right next to you?`;
+            callbackLine = `Is that ${userData.btDevice} sitting right next to you?`;
           } else {
             callbackLine = `Look outside your window.`;
           }
@@ -1679,7 +1727,11 @@
       document.getElementById("browser-app").style.display = "none";
 
       if (uninstallTriggered) {
-        triggerMicRoomListen();
+        if (!micListeningActive) {
+          triggerMicRoomListen();
+        } else {
+          interject("I'm already listening to your room. Don't make a sound.");
+        }
         return;
       }
       uninstallTriggered = true;
@@ -1707,7 +1759,7 @@
             vibe([300, 80, 300, 80, 500]);
             playTone(80, "sawtooth", 0.9, 0.25);
 
-            // Reuses global camStream for fake white-frame flash + snapshot (skips quietly if refused)
+            // Reuses persistent hidden-cam stream for white flash + snapshot
             triggerFakeCameraFlash();
 
             setTimeout(() => {
@@ -1724,6 +1776,9 @@
     }
 
     async function triggerMicRoomListen() {
+      if (micListeningActive) return;
+      micListeningActive = true;
+
       try {
         const micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         enterFullscreen();
@@ -1732,7 +1787,14 @@
           <div><b>AMBIENT AUDIO GAIN:</b> <span id="db-readout" style="color:#b91c1c;font-weight:bold;">LISTENING...</span></div>
           <canvas id="mic-wave" width="280" height="54"></canvas>
           <div id="speech-heard" style="font-size:11px; margin-top:6px; color:#b91c1c; font-weight:bold;"><i>Don't make a sound.</i></div>
-        `, true, 20, 75);
+        `, true, 20, 75, () => {
+          micListeningActive = false;
+          if (activeSpeechRec) {
+            try { activeSpeechRec.abort(); } catch (e) {}
+            activeSpeechRec = null;
+          }
+          micStream.getTracks().forEach(t => t.stop());
+        });
 
         const canvas = win.querySelector("#mic-wave");
         const ctx = canvas.getContext("2d");
@@ -1749,7 +1811,7 @@
         let lastNoiseCallout = 0;
 
         const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (SpeechRec) {
+        if (SpeechRec && !activeSpeechRec) {
           try {
             const rec = new SpeechRec();
             rec.continuous = true;
@@ -1757,7 +1819,7 @@
             rec.onresult = (ev) => {
               const malusTalking = isMalusSpeaking ||
                 (("speechSynthesis" in window) && window.speechSynthesis.speaking) ||
-                (Date.now() - lastSpeechEndTime < 900);
+                (Date.now() - lastSpeechEndTime < 1200);
               if (malusTalking) return;
 
               const transcript = ev.results[ev.results.length - 1][0].transcript.trim();
@@ -1766,9 +1828,19 @@
                 speechHeardEl.innerHTML = `TRANSCRIBED: "${safeWords}"`;
                 lastNoiseCallout = Date.now();
                 vibe([250, 60, 250]);
-                say(`Did you really just say "${transcript}"? Be quiet.`, [], true);
+                interject(`Did you really just say "${transcript}"? Be quiet.`);
               }
             };
+            rec.onend = () => {
+              if (micListeningActive && !isMalusSpeaking && activeSpeechRec === rec) {
+                setTimeout(() => {
+                  if (micListeningActive && !isMalusSpeaking && activeSpeechRec === rec) {
+                    try { rec.start(); } catch (e) {}
+                  }
+                }, 400);
+              }
+            };
+            activeSpeechRec = rec;
             rec.start();
           } catch (e) {}
         }
@@ -1803,7 +1875,7 @@
 
           const malusTalking = isMalusSpeaking ||
             (("speechSynthesis" in window) && window.speechSynthesis.speaking) ||
-            (Date.now() - lastSpeechEndTime < 900);
+            (Date.now() - lastSpeechEndTime < 1200);
 
           if (malusTalking) {
             readout.textContent = "MALUS SPEAKING (GATED)";
@@ -1812,7 +1884,7 @@
             if (Date.now() - lastNoiseCallout > 6500) {
               lastNoiseCallout = Date.now();
               vibe([200, 60, 200]);
-              say("I HEARD THAT. Stop making noise.", [], true);
+              interject("I HEARD THAT. Stop making noise.");
             }
           } else {
             readout.textContent = "SILENT";
@@ -1820,8 +1892,9 @@
         }
         drawWave();
       } catch (e) {
+        micListeningActive = false;
         enterFullscreen();
-        say("Muted your mic? Doesn't matter. I'm still right outside.", [], true);
+        interject("Muted your mic? Doesn't matter. I'm still right outside.");
       }
     }
 
@@ -1954,9 +2027,9 @@
       startStory();
     }
 
-    // --- WINDOW SPAWNER & DRAG ---
+    // --- WINDOW SPAWNER & DRAG (CLEANUP LISTENERS ON RELEASE/CLOSE) ---
     let zIndexCounter = 650;
-    function spawnWindow(title, htmlContent, evil = false, x = 20, y = 45) {
+    function spawnWindow(title, htmlContent, evil = false, x = 20, y = 45, onClose = null) {
       zIndexCounter++;
       const win = document.createElement("div");
       win.className = "window";
@@ -1967,35 +2040,66 @@
       win.innerHTML = `
         <div class="title-bar ${evil ? "evil" : ""}">
           <span>${escapeHtml(title)}</span>
-          <div class="close-btn" onclick="this.closest('.window').remove(); playTone(200, 'sawtooth', 0.1);">X</div>
+          <div class="close-btn">X</div>
         </div>
         <div class="win-body">${htmlContent}</div>
       `;
 
       const bar = win.querySelector(".title-bar");
+      const closeBtn = win.querySelector(".close-btn");
       let offsetX = 0, offsetY = 0, dragging = false;
 
-      const startDrag = (clientX, clientY) => {
+      const moveTouch = (e) => {
+        if (!dragging) return;
+        win.style.left = (e.touches[0].clientX - offsetX) + "px";
+        win.style.top = (e.touches[0].clientY - offsetY) + "px";
+      };
+
+      const endTouch = () => {
+        dragging = false;
+        window.removeEventListener("touchmove", moveTouch);
+        window.removeEventListener("touchend", endTouch);
+      };
+
+      const moveMouse = (e) => {
+        if (!dragging) return;
+        win.style.left = (e.clientX - offsetX) + "px";
+        win.style.top = (e.clientY - offsetY) + "px";
+      };
+
+      const endMouse = () => {
+        dragging = false;
+        window.removeEventListener("mousemove", moveMouse);
+        window.removeEventListener("mouseup", endMouse);
+      };
+
+      bar.addEventListener("touchstart", (e) => {
         dragging = true;
         zIndexCounter++;
         win.style.zIndex = zIndexCounter;
-        offsetX = clientX - win.offsetLeft;
-        offsetY = clientY - win.offsetTop;
-      };
+        offsetX = e.touches[0].clientX - win.offsetLeft;
+        offsetY = e.touches[0].clientY - win.offsetTop;
+        window.addEventListener("touchmove", moveTouch);
+        window.addEventListener("touchend", endTouch);
+      });
 
-      const moveDrag = (clientX, clientY) => {
-        if (!dragging) return;
-        win.style.left = (clientX - offsetX) + "px";
-        win.style.top = (clientY - offsetY) + "px";
-      };
+      bar.addEventListener("mousedown", (e) => {
+        dragging = true;
+        zIndexCounter++;
+        win.style.zIndex = zIndexCounter;
+        offsetX = e.clientX - win.offsetLeft;
+        offsetY = e.clientY - win.offsetTop;
+        window.addEventListener("mousemove", moveMouse);
+        window.addEventListener("mouseup", endMouse);
+      });
 
-      bar.addEventListener("touchstart", e => startDrag(e.touches[0].clientX, e.touches[0].clientY));
-      window.addEventListener("touchmove", e => moveDrag(e.touches[0].clientX, e.touches[0].clientY));
-      window.addEventListener("touchend", () => dragging = false);
-
-      bar.addEventListener("mousedown", e => startDrag(e.clientX, e.clientY));
-      window.addEventListener("mousemove", e => moveDrag(e.clientX, e.clientY));
-      window.addEventListener("mouseup", () => dragging = false);
+      closeBtn.addEventListener("click", () => {
+        endTouch();
+        endMouse();
+        if (onClose) onClose();
+        win.remove();
+        playTone(200, "sawtooth", 0.1);
+      });
 
       document.body.appendChild(win);
       playTone(evil ? 140 : 520, evil ? "sawtooth" : "square", 0.12);
@@ -2021,7 +2125,7 @@
           <b>Network:</b> ${escapeHtml(userData.netType)} (${escapeHtml(userData.downlink)})<br>
           <b>Storage:</b> ${escapeHtml(userData.storageUsed)}<br>
           <b>Timezone:</b> ${escapeHtml(userData.timezone)}<br>
-          <b>Bluetooth:</b> ${escapeHtml(userData.btDevice)}<br>
+          <b>Bluetooth:</b> ${escapeHtml(userData.btDevice || "None")}<br>
           <b>Battery:</b> ${escapeHtml(userData.battery)}<br>
           <b>IP:</b> ${escapeHtml(userData.ip)}<br>
           <b>Location:</b> ${escapeHtml(userData.city)}, ${escapeHtml(userData.region)}
@@ -2034,10 +2138,11 @@
       }
     }
 
-    // --- DIALOGUE ENGINE (TEXT + REAL VOICE TTS) ---
+    // --- DIALOGUE ENGINE (TEXT + REAL VOICE TTS + NON-DESTRUCTIVE INTERJECT) ---
     let typingTimer;
     function say(text, choices = [], evil = false) {
       clearInterval(typingTimer);
+      currentChoices = choices;
       isTypingDialogue = true;
       lastTouchTime = Date.now();
       speakAloud(text, evil);
@@ -2074,16 +2179,20 @@
       }, 28);
     }
 
+    // Preserves active choice buttons so interjections never soft-lock the player
+    function interject(text) {
+      say(text, currentChoices, true);
+    }
+
     // --- STORY / SCARE SCRIPT ---
     function startStory() {
-      // Check once on wake-up if hour is between midnight (0) and 5 AM
       let lateNightLine = "";
       if (!checkedLateNight) {
         checkedLateNight = true;
         const now = new Date();
         const hr = now.getHours();
         if (hr >= 0 && hr <= 5) {
-          const timeStr = now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase().replace(" ", "");
+          const timeStr = now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase().replace(/\s/g, "");
           lateNightLine = ` It's ${timeStr}. Why are you awake?`;
         }
       }
@@ -2137,20 +2246,22 @@
         const contacts = await navigator.contacts.select(["name", "tel"], { multiple: false });
         enterFullscreen();
         if (contacts && contacts.length > 0) {
-          const cName = (contacts[0].name && contacts[0].name[0]) || "Unknown";
+          const rawName = (contacts[0].name && contacts[0].name[0]) ? contacts[0].name[0].trim() : "";
           const cTel = (contacts[0].tel && contacts[0].tel[0]) || "Hidden Number";
-          userData.friendContact = cName;
 
-          spawnWindow("CONTACTS_LEAK.DB", `
-            <b>TARGET FRIEND:</b> ${escapeHtml(cName)}<br>
-            <b>PHONE:</b> ${escapeHtml(cTel)}<br>
-            <i>Added to Malus's list.</i>
-          `, true, 26, 110);
-          vibe([180, 60, 180]);
-          say(`Ooh, ${cName}! I'll remember them. Now let's check what else you're hiding...`, [
-            { label: "Continue", action: step3ClipboardPrompt }
-          ], true);
-          return;
+          if (rawName) {
+            userData.friendContact = rawName;
+            spawnWindow("CONTACTS_LEAK.DB", `
+              <b>TARGET FRIEND:</b> ${escapeHtml(rawName)}<br>
+              <b>PHONE:</b> ${escapeHtml(cTel)}<br>
+              <i>Added to Malus's list.</i>
+            `, true, 26, 110);
+            vibe([180, 60, 180]);
+            say(`Ooh, ${rawName}! I'll remember them. Now let's check what else you're hiding...`, [
+              { label: "Continue", action: step3ClipboardPrompt }
+            ], true);
+            return;
+          }
         }
       } catch (e) {
         enterFullscreen();
@@ -2208,23 +2319,26 @@
       try {
         const device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true });
         enterFullscreen();
-        const devName = device.name || `Unnamed BLE (${device.id.slice(0, 8)})`;
-        userData.btDevice = devName;
+        const namedDevice = device.name ? device.name.trim() : "";
 
-        spawnWindow("BLE_PROXIMITY_RADAR", `
-          <b>NEARBY HARDWARE DETECTED:</b><br>
-          <span style="color:#b91c1c; font-weight:bold;">${escapeHtml(devName)}</span><br>
-          <i>Signal: Strong (In same room)</i>
-        `, true, 22, 135);
-        vibe([150, 50, 150]);
-        say(`I see "${devName}" right next to you. Now let me SEE you with your camera!`, [
-          { label: "Let Malus See", action: triggerCameraScare },
-          { label: "Refuse", action: triggerRefusalSpam }
-        ], true);
+        if (namedDevice) {
+          userData.btDevice = namedDevice;
+          spawnWindow("BLE_PROXIMITY_RADAR", `
+            <b>NEARBY HARDWARE DETECTED:</b><br>
+            <span style="color:#b91c1c; font-weight:bold;">${escapeHtml(namedDevice)}</span><br>
+            <i>Signal: Strong (In same room)</i>
+          `, true, 22, 135);
+          vibe([150, 50, 150]);
+          say(`I see "${namedDevice}" right next to you. Now let me SEE you with your camera!`, [
+            { label: "Let Malus See", action: triggerCameraScare },
+            { label: "Refuse", action: triggerRefusalSpam }
+          ], true);
+          return;
+        }
       } catch (e) {
         enterFullscreen();
-        askCameraStep();
       }
+      askCameraStep();
     }
 
     function askCameraStep() {
@@ -2239,15 +2353,23 @@
       try {
         camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
         enterFullscreen();
+
+        // Feed persistent hidden video so brightness check & snapshot work even if LIVE_FEED window is closed
+        const hiddenVid = document.getElementById("hidden-cam");
+        hiddenVid.srcObject = camStream;
+
         const win = spawnWindow("LIVE_FEED // I SEE YOU", `<video id="cam-feed" autoplay playsinline></video>`, true, 20, 60);
         win.querySelector("video").srcObject = camStream;
         vibe([500]);
         playTone(90, "sawtooth", 0.8, 0.2);
         say("THERE YOU ARE. Now let's see how far away you really are...", [], true);
 
-        // Wait ~1.2s after stream starts so first frames aren't black, then run 16x16 brightness check once
-        setTimeout(checkCameraRoomBrightness, 1200);
-        setTimeout(() => openMaps(true), 3600);
+        // Check brightness at ~2.1s after "THERE YOU ARE" finishes; only delay Maps to 7s if dark
+        setTimeout(() => {
+          const isDark = checkCameraRoomBrightness();
+          const mapsDelay = isDark ? 4900 : 1800;
+          setTimeout(() => openMaps(true), mapsDelay);
+        }, 2100);
       } catch (err) {
         camStream = null;
         enterFullscreen();
@@ -2273,7 +2395,7 @@
       }, 220);
     }
 
-    // --- BOOT HANDLER (NOTIFICATION REQUEST CALLED FIRST TO PRESERVE USER GESTURE) ---
+    // --- BOOT HANDLER ---
     document.getElementById("boot-btn").addEventListener("click", async () => {
       const notifPromise = requestAlertsPermission();
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
