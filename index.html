@@ -50,6 +50,17 @@
       z-index: 9999;
     }
 
+    /* Screen White Flash Overlay */
+    #screen-flash {
+      position: fixed;
+      inset: 0;
+      background: #ffffff;
+      opacity: 0;
+      pointer-events: none;
+      z-index: 9998;
+      transition: opacity 0.25s ease-out;
+    }
+
     /* Boot Screen */
     #boot-screen {
       position: fixed;
@@ -620,12 +631,13 @@
       cursor: pointer;
     }
 
-    video#cam-feed {
+    video#cam-feed, img.snap-img {
       width: 100%;
       background: #000;
       border: 2px inset #808080;
       transform: scaleX(-1);
       filter: contrast(1.4) grayscale(0.4);
+      display: block;
     }
 
     canvas#mic-wave {
@@ -649,6 +661,9 @@
   </style>
 </head>
 <body>
+
+  <!-- Screen Flash Overlay -->
+  <div id="screen-flash"></div>
 
   <!-- Boot Screen -->
   <div id="boot-screen">
@@ -786,6 +801,16 @@
   </div>
 
   <script>
+    // --- HTML ESCAPER FOR SPAWNWINDOW ---
+    function escapeHtml(str) {
+      return String(str ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
     // --- TELEMETRY STATE ---
     const userData = {
       city: "Miami",
@@ -801,13 +826,13 @@
       gpu: "Adreno ARM64 GPU",
       displaySpec: `${screen.width}x${screen.height} @ ${window.devicePixelRatio || 1}x DPR (${screen.colorDepth}-bit)`,
       colorScheme: window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "Dark Mode" : "Light Mode",
-      roomLux: null,
+      roomBrightness: "Unknown",
       netType: "5G",
       downlink: "100 Mbps",
       storageUsed: "42.8 GB",
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York",
       language: navigator.language || "en-US",
-      btDevice: "None scanned",
+      btDevice: "None",
       friendContact: "None",
       notifState: ("Notification" in window) ? Notification.permission : "unsupported",
       platform: navigator.userAgent.includes("Android") ? "Android" : "Mobile Device"
@@ -821,19 +846,29 @@
     ];
     const malusStartSpot = orlandoStreets[Math.floor(Math.random() * orlandoStreets.length)];
 
+    // Global camera stream & scene flags
+    let camStream = null;
     let takeoverActive = false;
     let malusInstalled = false;
     let isDownloading = false;
     let shouldStayFullscreen = false;
     let mapHijackMode = false;
     let malusEnRoute = false;
+    let sceneRunning = false;
+    let isTypingDialogue = false;
     let wakeLockSentinel = null;
     let lastSensorScold = 0;
     let lastEscapeScold = 0;
-    let torchTrack = null;
     let isMalusSpeaking = false;
     let lastSpeechEndTime = 0;
     let swRegistration = null;
+
+    // One-shot flags for battery thresholds, midnight check, and idle timer
+    let warnedBat20 = false;
+    let warnedBat10 = false;
+    let checkedLateNight = false;
+    let lastTouchTime = Date.now();
+    let idleScoldCooldown = 0;
 
     // --- SERVICE WORKER REGISTRATION ---
     if ("serviceWorker" in navigator) {
@@ -842,25 +877,26 @@
       }).catch(() => {});
     }
 
-    // --- DIRECT NOTIFICATION PERMISSION HELPER ---
-    async function requestAlertsPermission() {
+    // --- DIRECT NOTIFICATION PERMISSION HELPER (CALLED FIRST ON CLICK) ---
+    function requestAlertsPermission() {
       if (!("Notification" in window)) {
         userData.notifState = "unsupported";
-        return "unsupported";
+        return Promise.resolve("unsupported");
       }
       if (Notification.permission === "default") {
-        try {
-          const result = await Notification.requestPermission();
-          userData.notifState = result;
-          enterFullscreen();
-          return result;
-        } catch (e) {
-          userData.notifState = "denied";
-          return "denied";
-        }
+        return Notification.requestPermission()
+          .then((result) => {
+            userData.notifState = result;
+            enterFullscreen();
+            return result;
+          })
+          .catch(() => {
+            userData.notifState = "denied";
+            return "denied";
+          });
       }
       userData.notifState = Notification.permission;
-      return Notification.permission;
+      return Promise.resolve(Notification.permission);
     }
 
     // --- WEBGL GPU FINGERPRINT ---
@@ -880,18 +916,8 @@
       } catch (e) {}
     }
 
-    // --- AMBIENT LIGHT SENSOR & SYSTEM THEME WATCHER ---
-    function initEnvironmentSensors() {
-      if ("AmbientLightSensor" in window) {
-        try {
-          const sensor = new AmbientLightSensor();
-          sensor.addEventListener("reading", () => {
-            userData.roomLux = Math.round(sensor.illuminance);
-          });
-          sensor.start();
-        } catch (e) {}
-      }
-
+    // --- DARK/LIGHT THEME WATCHER ---
+    function initThemeWatcher() {
       if (window.matchMedia) {
         window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
           userData.colorScheme = e.matches ? "Dark Mode" : "Light Mode";
@@ -900,6 +926,67 @@
           }
         });
       }
+    }
+
+    // --- CAMERA BRIGHTNESS CHECK (16x16 CANVAS PIXEL AVERAGE, RUNS ONCE) ---
+    function checkCameraRoomBrightness() {
+      if (!camStream) return;
+      const vid = document.getElementById("cam-feed");
+      if (!vid || vid.readyState < 2) return;
+
+      try {
+        const c = document.createElement("canvas");
+        c.width = 16;
+        c.height = 16;
+        const ctx = c.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(vid, 0, 0, 16, 16);
+        const pixels = ctx.getImageData(0, 0, 16, 16).data;
+
+        let totalLuma = 0;
+        const count = pixels.length / 4;
+        for (let i = 0; i < pixels.length; i += 4) {
+          totalLuma += 0.299 * pixels[i] + 0.587 * pixels[i + 1] + 0.114 * pixels[i + 2];
+        }
+        const avgLuma = totalLuma / count;
+        userData.roomBrightness = avgLuma < 52 ? `Dark (${Math.round(avgLuma)} luma)` : `Lit (${Math.round(avgLuma)} luma)`;
+
+        if (avgLuma < 52) {
+          vibe([140, 60, 140]);
+          say("Why are the lights off? Sitting in the dark won't hide you from me...", [], true);
+        }
+      } catch (e) {}
+    }
+
+    // --- FAKE CAMERA FLASH + SNAPSHOT REUSING EXISTING STREAM ---
+    function triggerFakeCameraFlash() {
+      if (!camStream) return;
+      const vid = document.getElementById("cam-feed");
+      if (!vid || vid.readyState < 2) return;
+
+      try {
+        const flashEl = document.getElementById("screen-flash");
+        flashEl.style.transition = "none";
+        flashEl.style.opacity = "1";
+        playTone(1400, "sine", 0.06, 0.18);
+
+        const snapCanvas = document.createElement("canvas");
+        snapCanvas.width = vid.videoWidth || 240;
+        snapCanvas.height = vid.videoHeight || 180;
+        snapCanvas.getContext("2d").drawImage(vid, 0, 0, snapCanvas.width, snapCanvas.height);
+        const dataUrl = snapCanvas.toDataURL("image/jpeg", 0.75);
+
+        setTimeout(() => {
+          flashEl.style.transition = "opacity 0.35s ease-out";
+          flashEl.style.opacity = "0";
+        }, 80);
+
+        spawnWindow("CANDID_CAPTURE.JPG", `
+          <img class="snap-img" src="${dataUrl}" alt="Captured" />
+          <div style="font-size:11px; margin-top:6px; color:#b91c1c; font-weight:bold;">
+            Saved to /sdcard/Malus/face_01.jpg
+          </div>
+        `, true, 28, 70);
+      } catch (e) {}
     }
 
     // --- MEDIA SESSION API ---
@@ -941,7 +1028,7 @@
       } catch (e) {}
     }
 
-    // --- SCREEN WAKE LOCK & APP-SWITCHER ESCAPE TRAP ---
+    // --- SCREEN WAKE LOCK & TAB TITLE SWAP + ESCAPE TRAP ---
     async function requestScreenWakeLock() {
       if ("wakeLock" in navigator) {
         try {
@@ -950,10 +1037,16 @@
       }
     }
 
+    const originalTitle = document.title;
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden" && takeoverActive) {
-        pushSystemNotification("WHERE ARE YOU GOING?", "Switching apps won't get rid of me. Come back.", "malus-escape");
+      if (document.visibilityState === "hidden") {
+        if (takeoverActive) {
+          document.title = "I SEE YOU";
+          pushSystemNotification("WHERE ARE YOU GOING?", "Switching apps won't get rid of me. Come back.", "malus-escape");
+        }
       } else if (document.visibilityState === "visible") {
+        document.title = originalTitle;
+        lastTouchTime = Date.now();
         if (shouldStayFullscreen) requestScreenWakeLock();
         if (takeoverActive && Date.now() - lastEscapeScold > 7000) {
           lastEscapeScold = Date.now();
@@ -964,10 +1057,35 @@
       }
     });
 
+    // --- 30-SECOND IDLE TIMER (RESET ON TOUCH, PAUSED DURING SPEECH / SCENES) ---
+    document.addEventListener("touchstart", () => { lastTouchTime = Date.now(); }, { passive: true });
+    document.addEventListener("pointerdown", () => { lastTouchTime = Date.now(); }, { passive: true });
+
+    setInterval(() => {
+      if (!takeoverActive) return;
+      const busy = sceneRunning ||
+        malusEnRoute ||
+        isTypingDialogue ||
+        isMalusSpeaking ||
+        (("speechSynthesis" in window) && window.speechSynthesis.speaking);
+
+      if (busy) {
+        lastTouchTime = Date.now();
+        return;
+      }
+
+      if (Date.now() - lastTouchTime >= 30000 && Date.now() - idleScoldCooldown > 35000) {
+        idleScoldCooldown = Date.now();
+        lastTouchTime = Date.now();
+        vibe([140, 80, 140]);
+        say("Why did you stop? I'm still here.", [], true);
+      }
+    }, 1000);
+
     // --- GAMEPAD API DETECTION ---
     window.addEventListener("gamepadconnected", (e) => {
       if (!takeoverActive) return;
-      const padName = e.gamepad.id.split("(")[0].trim() || "Controller";
+      const padName = escapeHtml(e.gamepad.id.split("(")[0].trim() || "Controller");
       vibe([200, 80, 200]);
       spawnWindow("HID_INPUT_DETECTED", `<b>EXTERNAL CONTROLLER:</b><br>${padName}<br><br><i>Buttons won't save you.</i>`, true, 24, 90);
       speakAloud("I see your controller connected. It won't help you.", true);
@@ -986,6 +1104,7 @@
         utter.onend = () => {
           isMalusSpeaking = false;
           lastSpeechEndTime = Date.now();
+          lastTouchTime = Date.now();
         };
         utter.onerror = () => {
           isMalusSpeaking = false;
@@ -996,27 +1115,6 @@
       } catch (e) {
         isMalusSpeaking = false;
       }
-    }
-
-    // --- HARDWARE FLASHLIGHT / TORCH SLOW PULSE ---
-    async function pulseHardwareTorch(blinks = 2) {
-      try {
-        if (!torchTrack) {
-          const camStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: "environment" }
-          });
-          torchTrack = camStream.getVideoTracks()[0];
-        }
-        const caps = torchTrack.getCapabilities ? torchTrack.getCapabilities() : {};
-        if (!caps.torch) return;
-
-        for (let i = 0; i < blinks; i++) {
-          await torchTrack.applyConstraints({ advanced: [{ torch: true }] });
-          await new Promise(r => setTimeout(r, 450));
-          await torchTrack.applyConstraints({ advanced: [{ torch: false }] });
-          await new Promise(r => setTimeout(r, 600));
-        }
-      } catch (e) {}
     }
 
     // --- DEVICE ORIENTATION & MOTION SENSORS ---
@@ -1053,7 +1151,7 @@
       });
     }
 
-    // --- REAL ANDROID SYSTEM NOTIFICATIONS VIA SW.JS (WITH INLINE DATA-URI ICON) ---
+    // --- REAL ANDROID SYSTEM NOTIFICATIONS VIA SW.JS ---
     const malusIconDataUri =
       "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23ff2a5f'/><text x='50%' y='54%' font-size='38' text-anchor='middle' dominant-baseline='middle'>🍎</text></svg>";
 
@@ -1078,9 +1176,7 @@
           return;
         }
         new Notification(title, options);
-      } catch (e) {
-        spawnWindow("NOTIF_ERROR", `<b>Chrome blocked notification:</b><br>${e.message}`, true, 24, 90);
-      }
+      } catch (e) {}
     }
 
     // --- FULLSCREEN PERSISTENCE ---
@@ -1127,11 +1223,33 @@
       if (navigator.vibrate) navigator.vibrate(pattern);
     }
 
-    // --- CLOCK & TELEMETRY ---
+    // Short 3-beat heartbeat pulse (finite so it doesn't get annoying)
+    function pulseHeartbeat() {
+      vibe([90, 110, 90, 700, 90, 110, 90, 700, 90, 110, 90]);
+    }
+
+    // --- CLOCK & TELEMETRY (WITH 20% & 10% ONE-SHOT BATTERY THRESHOLDS) ---
     setInterval(() => {
       const now = new Date();
       document.getElementById("clock").textContent = now.toTimeString().slice(0, 5);
     }, 1000);
+
+    function checkBatteryThresholds(levelFloat) {
+      if (!takeoverActive) return;
+      const pct = Math.round(levelFloat * 100);
+      if (pct <= 10 && !warnedBat10) {
+        warnedBat10 = true;
+        warnedBat20 = true;
+        pulseHeartbeat();
+        spawnWindow("CRITICAL_BATTERY_10%", `<b>${pct}% REMAINING.</b><br>You're running out of time.`, true, 24, 105);
+        say("You're running out of time...", [], true);
+      } else if (pct <= 20 && !warnedBat20) {
+        warnedBat20 = true;
+        pulseHeartbeat();
+        spawnWindow("LOW_BATTERY_20%", `<b>${pct}% REMAINING.</b><br>You're running out of time.`, true, 24, 105);
+        say("You're running out of time...", [], true);
+      }
+    }
 
     async function grabTelemetry() {
       grabGpuFingerprint();
@@ -1144,6 +1262,7 @@
             userData.charging = bat.charging;
             document.getElementById("bat-status").textContent =
               `BAT: ${userData.battery}${bat.charging ? "⚡" : ""}`;
+            checkBatteryThresholds(bat.level);
           };
           updateBat();
 
@@ -1155,7 +1274,7 @@
             const msg = bat.charging
               ? "Plugging your charger in won't give you enough time to escape."
               : "Unplugging your charger won't stop me either.";
-            spawnWindow("POWER_RAIL_EVENT", `<b>AC POWER:</b> ${bat.charging ? "CONNECTED" : "DISCONNECTED"}<br><i>${msg}</i>`, true, 24, 115);
+            spawnWindow("POWER_RAIL_EVENT", `<b>AC POWER:</b> ${bat.charging ? "CONNECTED" : "DISCONNECTED"}<br><i>${escapeHtml(msg)}</i>`, true, 24, 115);
             speakAloud(msg, true);
           });
         } catch (e) {}
@@ -1331,6 +1450,7 @@
       destInput.value = "";
 
       if (hijacked) {
+        sceneRunning = true;
         originLabel.textContent = malusStartSpot.name;
         destInput.classList.add("hijacked");
         destInput.placeholder = "Tap here to choose destination...";
@@ -1382,8 +1502,8 @@
         <div class="map-sug-item" onclick="startMalusJourney()">
           <span>📍</span>
           <div>
-            <div>${userData.city}, ${userData.region} (YOUR IP LOCATION)</div>
-            <div style="font-size:11px; color:#dc2626;">${userData.lat.toFixed(4)}, ${userData.lon.toFixed(4)} • ${userData.ip}</div>
+            <div>${escapeHtml(userData.city)}, ${escapeHtml(userData.region)} (YOUR IP LOCATION)</div>
+            <div style="font-size:11px; color:#dc2626;">${userData.lat.toFixed(4)}, ${userData.lon.toFixed(4)} • ${escapeHtml(userData.ip)}</div>
           </div>
         </div>
       `;
@@ -1439,6 +1559,7 @@
     async function startMalusJourney() {
       if (malusEnRoute) return;
       malusEnRoute = true;
+      sceneRunning = true;
 
       const sugBox = document.getElementById("maps-suggestions");
       sugBox.style.display = "none";
@@ -1507,6 +1628,8 @@
           clearInterval(moveTimer);
           malusEnRoute = false;
           mapHijackMode = false;
+          sceneRunning = false;
+          lastTouchTime = Date.now();
 
           leafletMap.setView(pos, 16);
           banner.textContent = `ARRIVED AT ${userData.city.toUpperCase()} // OUTSIDE`;
@@ -1518,13 +1641,30 @@
 
           document.getElementById("uninstall-icon").style.display = "flex";
 
+          // Build personalized finale callbacks using previously collected contact & Bluetooth data
+          const hasContact = userData.friendContact && userData.friendContact !== "None";
+          const hasBt = userData.btDevice && userData.btDevice !== "None";
+
+          let callbackLine = "";
+          if (hasContact && hasBt) {
+            callbackLine = `I already told ${userData.friendContact} you're busy—and I can see your ${userData.btDevice} right next to you.`;
+          } else if (hasContact) {
+            callbackLine = `Don't bother calling ${userData.friendContact}. I already told them you're busy.`;
+          } else if (hasBt) {
+            callbackLine = `Is that your ${userData.btDevice} sitting right next to you?`;
+          } else {
+            callbackLine = `Look outside your window.`;
+          }
+
           spawnWindow("GPS_PROXIMITY_ALERT", `
             <b>DISTANCE TO TARGET:</b> 0.02 mi<br>
             <b>COORDINATES:</b> ${pos[0].toFixed(4)}, ${pos[1].toFixed(4)}<br>
+            <b>NEARBY:</b> ${hasBt ? escapeHtml(userData.btDevice) : "LOCAL_ROOM"}<br>
+            <b>CONTACT NOTIFIED:</b> ${hasContact ? escapeHtml(userData.friendContact) : "NONE"}<br>
             <b>STATUS:</b> <span style="color:#b91c1c;font-weight:bold;">I AM HERE.</span>
-          `, true, 22, 130);
+          `, true, 22, 125);
 
-          say(`I'm here in ${userData.city}. Look outside your window.`, [
+          say(`I'm here in ${userData.city}. ${callbackLine}`, [
             { label: "Call for Help", action: triggerWebShareEscape },
             { label: "Try to Uninstall", action: triggerUninstallTrap }
           ], true);
@@ -1532,7 +1672,7 @@
       }, 145);
     }
 
-    // --- FAKE UNINSTALL TRAP -> AMBIENT MIC + SPEECH RECOGNITION + TORCH BLINK ---
+    // --- FAKE UNINSTALL TRAP -> FAKE CAMERA FLASH + AMBIENT MIC ---
     let uninstallTriggered = false;
     function triggerUninstallTrap() {
       document.getElementById("maps-app").style.display = "none";
@@ -1543,6 +1683,7 @@
         return;
       }
       uninstallTriggered = true;
+      sceneRunning = true;
 
       const win = spawnWindow("Package Installer — Removing MalusPet", `
         <div id="uninst-label">Uninstalling com.malus.pet...</div>
@@ -1565,10 +1706,14 @@
             document.body.classList.add("shake");
             vibe([300, 80, 300, 80, 500]);
             playTone(80, "sawtooth", 0.9, 0.25);
-            pulseHardwareTorch(2);
+
+            // Reuses global camStream for fake white-frame flash + snapshot (skips quietly if refused)
+            triggerFakeCameraFlash();
 
             setTimeout(() => {
               document.body.classList.remove("shake");
+              sceneRunning = false;
+              lastTouchTime = Date.now();
               say("Did you REALLY think you could uninstall me?! Be quiet... I'm listening to your room right now.", [
                 { label: "Allow Mic", action: triggerMicRoomListen }
               ], true);
@@ -1617,11 +1762,10 @@
 
               const transcript = ev.results[ev.results.length - 1][0].transcript.trim();
               if (transcript) {
-                const safeWords = transcript.slice(0, 60).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                const safeWords = escapeHtml(transcript.slice(0, 60));
                 speechHeardEl.innerHTML = `TRANSCRIBED: "${safeWords}"`;
                 lastNoiseCallout = Date.now();
                 vibe([250, 60, 250]);
-                pulseHardwareTorch(1);
                 say(`Did you really just say "${transcript}"? Be quiet.`, [], true);
               }
             };
@@ -1668,7 +1812,6 @@
             if (Date.now() - lastNoiseCallout > 6500) {
               lastNoiseCallout = Date.now();
               vibe([200, 60, 200]);
-              pulseHardwareTorch(1);
               say("I HEARD THAT. Stop making noise.", [], true);
             }
           } else {
@@ -1706,6 +1849,7 @@
         return;
       }
       isDownloading = true;
+      sceneRunning = true;
       await requestAlertsPermission();
 
       const btn = document.getElementById("dl-btn");
@@ -1801,6 +1945,8 @@
     function enterMalusTakeover() {
       takeoverActive = true;
       malusInstalled = true;
+      sceneRunning = false;
+      lastTouchTime = Date.now();
       hijackMediaSession(`MalusPet.exe — Watching ${userData.city}`);
       pushSystemNotification("MalusOS Active", "Bootloader unlocked. I'm inside your phone now!", "malus-boot");
       document.getElementById("mobile-home").style.background = "#008080";
@@ -1820,7 +1966,7 @@
 
       win.innerHTML = `
         <div class="title-bar ${evil ? "evil" : ""}">
-          <span>${title}</span>
+          <span>${escapeHtml(title)}</span>
           <div class="close-btn" onclick="this.closest('.window').remove(); playTone(200, 'sawtooth', 0.1);">X</div>
         </div>
         <div class="win-body">${htmlContent}</div>
@@ -1866,18 +2012,19 @@
         `, false, 24, 65);
       } else if (app === "sysinfo") {
         spawnWindow("Android System Telemetry", `
-          <b>OS:</b> ${userData.platform} (${userData.colorScheme})<br>
-          <b>Notifications:</b> ${userData.notifState}<br>
-          <b>CPU / RAM:</b> ${userData.cores} cores / ${userData.ram} GB<br>
-          <b>GPU Renderer:</b> ${userData.gpu}<br>
-          <b>Display:</b> ${userData.displaySpec}<br>
-          <b>Network:</b> ${userData.netType} (${userData.downlink})<br>
-          <b>Storage:</b> ${userData.storageUsed}<br>
-          <b>Timezone:</b> ${userData.timezone}<br>
-          <b>Bluetooth:</b> ${userData.btDevice}<br>
-          <b>Battery:</b> ${userData.battery}<br>
-          <b>IP:</b> ${userData.ip}<br>
-          <b>Location:</b> ${userData.city}, ${userData.region}
+          <b>OS:</b> ${escapeHtml(userData.platform)} (${escapeHtml(userData.colorScheme)})<br>
+          <b>Notifications:</b> ${escapeHtml(userData.notifState)}<br>
+          <b>CPU / RAM:</b> ${escapeHtml(userData.cores)} cores / ${escapeHtml(userData.ram)} GB<br>
+          <b>GPU Renderer:</b> ${escapeHtml(userData.gpu)}<br>
+          <b>Display:</b> ${escapeHtml(userData.displaySpec)}<br>
+          <b>Room Light:</b> ${escapeHtml(userData.roomBrightness)}<br>
+          <b>Network:</b> ${escapeHtml(userData.netType)} (${escapeHtml(userData.downlink)})<br>
+          <b>Storage:</b> ${escapeHtml(userData.storageUsed)}<br>
+          <b>Timezone:</b> ${escapeHtml(userData.timezone)}<br>
+          <b>Bluetooth:</b> ${escapeHtml(userData.btDevice)}<br>
+          <b>Battery:</b> ${escapeHtml(userData.battery)}<br>
+          <b>IP:</b> ${escapeHtml(userData.ip)}<br>
+          <b>Location:</b> ${escapeHtml(userData.city)}, ${escapeHtml(userData.region)}
         `, false, 30, 95);
       } else if (app === "gallery") {
         spawnWindow("Access Denied", `
@@ -1891,6 +2038,8 @@
     let typingTimer;
     function say(text, choices = [], evil = false) {
       clearInterval(typingTimer);
+      isTypingDialogue = true;
+      lastTouchTime = Date.now();
       speakAloud(text, evil);
 
       const box = document.getElementById("speech-box");
@@ -1912,6 +2061,8 @@
         i++;
         if (i >= text.length) {
           clearInterval(typingTimer);
+          isTypingDialogue = false;
+          lastTouchTime = Date.now();
           choices.forEach(c => {
             const btn = document.createElement("button");
             btn.className = "btn";
@@ -1925,7 +2076,19 @@
 
     // --- STORY / SCARE SCRIPT ---
     function startStory() {
-      say("Hi!! I'm Malus! Thank you for unlocking your bootloader for me! Want to be best friends forever?", [
+      // Check once on wake-up if hour is between midnight (0) and 5 AM
+      let lateNightLine = "";
+      if (!checkedLateNight) {
+        checkedLateNight = true;
+        const now = new Date();
+        const hr = now.getHours();
+        if (hr >= 0 && hr <= 5) {
+          const timeStr = now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase().replace(" ", "");
+          lateNightLine = ` It's ${timeStr}. Why are you awake?`;
+        }
+      }
+
+      say(`Hi!! I'm Malus! Thank you for unlocking your bootloader for me!${lateNightLine} Want to be best friends forever?`, [
         { label: "Sure!", action: step2Friendly },
         { label: "What did you do to my phone?!", action: step2Suspicious }
       ]);
@@ -1952,10 +2115,10 @@
       vibe([200, 100, 200, 100, 400]);
 
       spawnWindow("NETWORK_TRACE.LOG", `
-        <b>TARGET IP:</b> ${userData.ip}<br>
-        <b>ISP:</b> ${userData.isp}<br>
-        <b>CITY:</b> ${userData.city}<br>
-        <b>GPU:</b> ${userData.gpu}<br>
+        <b>TARGET IP:</b> ${escapeHtml(userData.ip)}<br>
+        <b>ISP:</b> ${escapeHtml(userData.isp)}<br>
+        <b>CITY:</b> ${escapeHtml(userData.city)}<br>
+        <b>GPU:</b> ${escapeHtml(userData.gpu)}<br>
         <b>STATUS:</b> WATCHING
       `, true, 18, 42);
 
@@ -1979,8 +2142,8 @@
           userData.friendContact = cName;
 
           spawnWindow("CONTACTS_LEAK.DB", `
-            <b>TARGET FRIEND:</b> ${cName}<br>
-            <b>PHONE:</b> ${cTel}<br>
+            <b>TARGET FRIEND:</b> ${escapeHtml(cName)}<br>
+            <b>PHONE:</b> ${escapeHtml(cTel)}<br>
             <i>Added to Malus's list.</i>
           `, true, 26, 110);
           vibe([180, 60, 180]);
@@ -2017,7 +2180,7 @@
       } catch (e) {}
 
       const cleanPreview = grabbedText.trim()
-        ? grabbedText.trim().slice(0, 80).replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        ? escapeHtml(grabbedText.trim().slice(0, 80))
         : "[EMPTY_CLIPBOARD_BUFFER]";
 
       spawnWindow("KEYBOARD_BUFFER.LOG", `
@@ -2050,7 +2213,7 @@
 
         spawnWindow("BLE_PROXIMITY_RADAR", `
           <b>NEARBY HARDWARE DETECTED:</b><br>
-          <span style="color:#b91c1c; font-weight:bold;">${devName}</span><br>
+          <span style="color:#b91c1c; font-weight:bold;">${escapeHtml(devName)}</span><br>
           <i>Signal: Strong (In same room)</i>
         `, true, 22, 135);
         vibe([150, 50, 150]);
@@ -2072,22 +2235,29 @@
     }
 
     async function triggerCameraScare() {
+      sceneRunning = true;
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+        camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
         enterFullscreen();
         const win = spawnWindow("LIVE_FEED // I SEE YOU", `<video id="cam-feed" autoplay playsinline></video>`, true, 20, 60);
-        win.querySelector("video").srcObject = stream;
+        win.querySelector("video").srcObject = camStream;
         vibe([500]);
         playTone(90, "sawtooth", 0.8, 0.2);
         say("THERE YOU ARE. Now let's see how far away you really are...", [], true);
-        setTimeout(() => openMaps(true), 3200);
+
+        // Wait ~1.2s after stream starts so first frames aren't black, then run 16x16 brightness check once
+        setTimeout(checkCameraRoomBrightness, 1200);
+        setTimeout(() => openMaps(true), 3600);
       } catch (err) {
+        camStream = null;
         enterFullscreen();
         triggerRefusalSpam();
       }
     }
 
     function triggerRefusalSpam() {
+      camStream = null;
+      sceneRunning = true;
       document.body.classList.add("shake");
       vibe([150, 50, 150, 50, 150, 50, 500]);
       let count = 0;
@@ -2103,19 +2273,19 @@
       }, 220);
     }
 
-    // --- BOOT HANDLER ---
+    // --- BOOT HANDLER (NOTIFICATION REQUEST CALLED FIRST TO PRESERVE USER GESTURE) ---
     document.getElementById("boot-btn").addEventListener("click", async () => {
+      const notifPromise = requestAlertsPermission();
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       shouldStayFullscreen = true;
       enterFullscreen();
-      await requestAlertsPermission();
       lockAndWatchOrientation();
       requestScreenWakeLock();
       initHardwareSensors();
-      initEnvironmentSensors();
+      initThemeWatcher();
       vibe([60]);
       playTone(600, "square", 0.15);
-      await grabTelemetry();
+      await Promise.all([notifPromise, grabTelemetry()]);
       document.getElementById("boot-screen").style.display = "none";
     });
   </script>
