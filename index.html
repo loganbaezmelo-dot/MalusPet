@@ -1004,6 +1004,18 @@
       }
     }
 
+    // --- QUICK WHITE SCREEN FLASH HELPER ---
+    function flashScreenWhite() {
+      const flashEl = document.getElementById("screen-flash");
+      if (!flashEl) return;
+      flashEl.style.transition = "none";
+      flashEl.style.opacity = "0.9";
+      setTimeout(() => {
+        flashEl.style.transition = "opacity 0.35s ease-out";
+        flashEl.style.opacity = "0";
+      }, 80);
+    }
+
     // --- CAMERA BRIGHTNESS CHECK USING PERSISTENT HIDDEN VIDEO ---
     function checkCameraRoomBrightness() {
       if (!camStream) return false;
@@ -1043,9 +1055,7 @@
       if (!vid || vid.readyState < 2) return;
 
       try {
-        const flashEl = document.getElementById("screen-flash");
-        flashEl.style.transition = "none";
-        flashEl.style.opacity = "1";
+        flashScreenWhite();
         playTone(1400, "sine", 0.06, 0.18);
 
         const snapCanvas = document.createElement("canvas");
@@ -1053,11 +1063,6 @@
         snapCanvas.height = vid.videoHeight || 180;
         snapCanvas.getContext("2d").drawImage(vid, 0, 0, snapCanvas.width, snapCanvas.height);
         const dataUrl = snapCanvas.toDataURL("image/jpeg", 0.75);
-
-        setTimeout(() => {
-          flashEl.style.transition = "opacity 0.35s ease-out";
-          flashEl.style.opacity = "0";
-        }, 80);
 
         spawnWindow("CANDID_CAPTURE.JPG", `
           <img class="snap-img" src="${dataUrl}" alt="Captured" />
@@ -1341,7 +1346,6 @@
 
     // Multi-provider IP lookup (avoids ipapi.co rate limits)
     async function fetchReliableIpGeo() {
-      // Provider 1: ipwho.is (high rate limit, free, no API key)
       try {
         const res = await fetch("https://ipwho.is/");
         const data = await res.json();
@@ -1357,7 +1361,6 @@
         }
       } catch (e) {}
 
-      // Provider 2: freeipapi.com fallback
       try {
         const res2 = await fetch("https://freeipapi.com/api/json");
         const data2 = await res2.json();
@@ -1372,7 +1375,6 @@
         }
       } catch (e) {}
 
-      // Fallback from timezone if both IP endpoints are blocked by an ad-blocker
       try {
         const tzCity = userData.timezone.split("/").pop().replace(/_/g, " ");
         if (tzCity && tzCity !== "UTC") userData.city = tzCity;
@@ -1621,7 +1623,6 @@
         const dotIcon = L.divIcon({ className: "malus-dot-marker", iconSize: [22, 22] });
         malusMarker = L.marker([malusStartSpot.lat, malusStartSpot.lon], { icon: dotIcon }).addTo(leafletMap);
 
-        // Try real Geolocation GPS for exact street accuracy; falls back cleanly to IP geo if denied
         await requestExactGpsLocation();
 
         destInput.placeholder = "Tap here to choose destination...";
@@ -1942,7 +1943,9 @@
                 speechHeardEl.innerHTML = `TRANSCRIBED: "${safeWords}"`;
                 lastNoiseCallout = Date.now();
                 vibe([250, 60, 250]);
-                interject(`Did you really just say "${transcript}"? Be quiet.`);
+                flashScreenWhite();
+                pulseHardwareTorch(1);
+                interject(`I heard you say "${transcript}". Be quiet.`);
               }
             };
             rec.onend = () => {
@@ -1998,7 +2001,9 @@
             if (Date.now() - lastNoiseCallout > 6500) {
               lastNoiseCallout = Date.now();
               vibe([200, 60, 200]);
-              interject("I HEARD THAT. Stop making noise.");
+              flashScreenWhite();
+              pulseHardwareTorch(1);
+              interject("I HEARD YOU. Stop making noise.");
             }
           } else {
             readout.textContent = "SILENT";
