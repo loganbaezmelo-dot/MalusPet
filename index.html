@@ -853,7 +853,9 @@
 
     // Global state & guards
     let camStream = null;
+    let activeTorchTrack = null;
     let currentChoices = [];
+    let isEvilState = false;
     let takeoverActive = false;
     let malusInstalled = false;
     let isDownloading = false;
@@ -969,14 +971,46 @@
         window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
           userData.colorScheme = e.matches ? "Dark Mode" : "Light Mode";
           if (takeoverActive) {
-            speakAloud(e.matches ? "Turning on dark mode won't hide you." : "Turning on light mode won't save you.", true);
+            speakAloud(e.matches ? "Turning on dark mode won't hide you." : "Turning on light mode won't save you.", isEvilState);
           }
         });
       }
     }
 
+    // --- PERSISTENT REAR TORCH ON/OFF (FOR "NO IT ISN'T" DARK ROOM REVEAL) ---
+    async function setHardwareTorch(on) {
+      try {
+        if (on) {
+          if (!activeTorchTrack) {
+            const rearStream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: "environment" }
+            });
+            activeTorchTrack = rearStream.getVideoTracks()[0];
+          }
+          const caps = activeTorchTrack.getCapabilities ? activeTorchTrack.getCapabilities() : {};
+          if (caps.torch) {
+            await activeTorchTrack.applyConstraints({ advanced: [{ torch: true }] });
+          }
+        } else {
+          if (activeTorchTrack) {
+            try {
+              await activeTorchTrack.applyConstraints({ advanced: [{ torch: false }] });
+            } catch (e) {}
+            try { activeTorchTrack.stop(); } catch (e) {}
+            activeTorchTrack = null;
+          }
+        }
+      } catch (e) {
+        if (!on && activeTorchTrack) {
+          try { activeTorchTrack.stop(); } catch (err) {}
+          activeTorchTrack = null;
+        }
+      }
+    }
+
     // --- HARDWARE REAR TORCH SLOW BLINK (SAFE < 1 FLASH/SEC + CLEAN TRACK STOP) ---
     async function pulseHardwareTorch(blinks = 2) {
+      await setHardwareTorch(false);
       let tempTorchTrack = null;
       try {
         const rearStream = await navigator.mediaDevices.getUserMedia({
@@ -1105,7 +1139,7 @@
             if (!takeoverActive) return;
             if (screen.orientation.type.includes("landscape")) {
               vibe([180, 60, 180]);
-              speakAloud("Don't flip your screen sideways. Keep looking at me.", true);
+              speakAloud("Don't flip your screen sideways. Keep looking at me.", isEvilState);
             }
           });
         }
@@ -1136,7 +1170,7 @@
           lastEscapeScold = Date.now();
           vibe([220, 60, 220]);
           spawnWindow("APP_SWITCH_INTERCEPT", "<b>NICE TRY.</b><br>You can't minimize MalusOS.", true, 26, 70);
-          speakAloud("Welcome back. Did you really think switching tabs would work?", true);
+          speakAloud("Welcome back. Did you really think switching tabs would work?", isEvilState);
         }
       }
     });
@@ -1172,7 +1206,7 @@
       const padName = escapeHtml(e.gamepad.id.split("(")[0].trim() || "Controller");
       vibe([200, 80, 200]);
       spawnWindow("HID_INPUT_DETECTED", `<b>EXTERNAL CONTROLLER:</b><br>${padName}<br><br><i>Buttons won't save you.</i>`, true, 24, 90);
-      speakAloud("I see your controller connected. It won't help you.", true);
+      speakAloud("I see your controller connected. It won't help you.", isEvilState);
     });
 
     // --- SPEECH SYNTHESIS (TTS VOICE WITH MIC & SPEECH-REC SELF-ECHO GATE) ---
@@ -1230,7 +1264,7 @@
           lastSensorScold = Date.now();
           vibe([250, 80, 250]);
           playTone(110, "sawtooth", 0.4, 0.2);
-          speakAloud("Don't turn your screen away from me.", true);
+          speakAloud("Don't turn your screen away from me.", isEvilState);
         }
       });
 
@@ -1243,7 +1277,7 @@
           vibe([300, 50, 300]);
           playTone(130, "sawtooth", 0.3, 0.2);
           spawnWindow("SENSOR_INTERRUPT", "<b>STOP SHAKING YOUR DEVICE.</b>", true, 30, 80);
-          speakAloud("Stop shaking me!", true);
+          speakAloud("Stop shaking me!", isEvilState);
         }
       });
     }
@@ -1444,7 +1478,7 @@
               ? "Plugging your charger in won't give you enough time to escape."
               : "Unplugging your charger won't stop me either.";
             spawnWindow("POWER_RAIL_EVENT", `<b>AC POWER:</b> ${bat.charging ? "CONNECTED" : "DISCONNECTED"}<br><i>${escapeHtml(msg)}</i>`, true, 24, 115);
-            speakAloud(msg, true);
+            speakAloud(msg, isEvilState);
           });
         } catch (e) {}
       }
@@ -1873,7 +1907,6 @@
             vibe([300, 80, 300, 80, 500]);
             playTone(80, "sawtooth", 0.9, 0.25);
 
-            // Reuses persistent hidden-cam stream for white flash + snapshot, plus safe slow rear torch pulse
             triggerFakeCameraFlash();
             pulseHardwareTorch(2);
 
@@ -2262,6 +2295,7 @@
     function say(text, choices = [], evil = false) {
       clearInterval(typingTimer);
       currentChoices = choices;
+      isEvilState = evil;
       isTypingDialogue = true;
       lastTouchTime = Date.now();
       speakAloud(text, evil);
@@ -2299,10 +2333,10 @@
     }
 
     function interject(text) {
-      say(text, currentChoices, true);
+      say(text, currentChoices, isEvilState);
     }
 
-    // --- STORY / SCARE SCRIPT ---
+    // --- STORY / SCARE SCRIPT (FRIENDLY UNTIL LIGHT CHECK / CAMERA TURN) ---
     function startStory() {
       let lateNightLine = "";
       if (!checkedLateNight) {
@@ -2318,42 +2352,41 @@
       say(`Hi!! I'm Malus! Thank you for unlocking your bootloader for me!${lateNightLine} Want to be best friends forever?`, [
         { label: "Sure!", action: step2Friendly },
         { label: "What did you do to my phone?!", action: step2Suspicious }
-      ]);
+      ], false);
     }
 
     function step2Friendly() {
       const darkComment = userData.colorScheme === "Dark Mode"
-        ? `Sitting in ${userData.colorScheme} in ${userData.city} won't hide you from me...`
+        ? `Even with ${userData.colorScheme} turned on in ${userData.city}...`
         : `Especially sitting here with you in ${userData.city}...`;
       say(`Yay!! I already feel so close to you! ${darkComment}`, [
         { label: "Wait how do you know that?!", action: step3Reveal }
-      ]);
+      ], false);
     }
 
     function step2Suspicious() {
       vibe([100, 50, 100]);
-      say(`Don't play dumb with me. I own this ${userData.platform} now—and I see you're at ${userData.battery} battery on ${userData.netType}.`, [
+      say(`Aww, don't be shy! I just configured your ${userData.platform}—and I see you're at ${userData.battery} battery on ${userData.netType}!`, [
         { label: "Creepy...", action: step3Reveal }
-      ], true);
+      ], false);
     }
 
     function step3Reveal() {
-      document.getElementById("mobile-home").style.background = "#1a0005";
-      vibe([200, 100, 200, 100, 400]);
+      vibe([140, 60, 140]);
 
       spawnWindow("NETWORK_TRACE.LOG", `
         <b>TARGET IP:</b> ${escapeHtml(userData.ip)}<br>
         <b>ISP:</b> ${escapeHtml(userData.isp)}<br>
         <b>CITY:</b> ${escapeHtml(userData.city)}<br>
         <b>GPU:</b> ${escapeHtml(userData.gpu)}<br>
-        <b>STATUS:</b> WATCHING
-      `, true, 18, 42);
+        <b>STATUS:</b> CONNECTED
+      `, false, 18, 42);
 
       if ("contacts" in navigator && "ContactsManager" in window) {
         say("If we're best friends, introduce me to your other friends! Pick someone from your contacts so I can say hi!", [
           { label: "Pick Contact", action: triggerContactPicker },
           { label: "No", action: step3ClipboardPrompt }
-        ], true);
+        ], false);
       } else {
         step3ClipboardPrompt();
       }
@@ -2372,12 +2405,12 @@
             spawnWindow("CONTACTS_LEAK.DB", `
               <b>TARGET FRIEND:</b> ${escapeHtml(rawName)}<br>
               <b>PHONE:</b> ${escapeHtml(cTel)}<br>
-              <i>Added to Malus's list.</i>
-            `, true, 26, 110);
-            vibe([180, 60, 180]);
-            say(`Ooh, ${rawName}! I'll remember them. Now let's check what else you're hiding...`, [
+              <i>Added to Malus's friend list!</i>
+            `, false, 26, 110);
+            vibe([120, 50, 120]);
+            say(`Ooh, ${rawName} seems nice! Now let's share even more secrets!`, [
               { label: "Continue", action: step3ClipboardPrompt }
-            ], true);
+            ], false);
             return;
           }
         }
@@ -2391,7 +2424,7 @@
       say("Best friends don't keep secrets! Let me see what you've been copying on your keyboard lately... I promise I won't leak it!", [
         { label: "Let Malus Peek", action: triggerClipboardPeek },
         { label: "No way", action: step3BluetoothPrompt }
-      ], true);
+      ], false);
     }
 
     async function triggerClipboardPeek() {
@@ -2414,11 +2447,11 @@
 
       spawnWindow("KEYBOARD_BUFFER.LOG", `
         <b>CAPTURED CLIPBOARD:</b><br>
-        <span style="color:#b91c1c; font-weight:bold;">"${cleanPreview}"</span><br><br>
-        <i>Don't worry... your secret is safe with me.</i>
-      `, true, 24, 155);
+        <span style="color:#000080; font-weight:bold;">"${cleanPreview}"</span><br><br>
+        <i>Don't worry... your secret is safe with me!</i>
+      `, false, 24, 155);
 
-      vibe([120, 60, 120]);
+      vibe([100, 50, 100]);
       step3BluetoothPrompt();
     }
 
@@ -2426,10 +2459,10 @@
       if (navigator.bluetooth) {
         say("Are you alone in that room right now? Let me scan your Bluetooth radio to see what's next to you!", [
           { label: "Scan Room", action: triggerBluetoothScan },
-          { label: "Skip", action: askCameraStep }
-        ], true);
+          { label: "Skip", action: askRoomLightStep }
+        ], false);
       } else {
-        askCameraStep();
+        askRoomLightStep();
       }
     }
 
@@ -2443,24 +2476,43 @@
           userData.btDevice = namedDevice;
           spawnWindow("BLE_PROXIMITY_RADAR", `
             <b>NEARBY HARDWARE DETECTED:</b><br>
-            <span style="color:#b91c1c; font-weight:bold;">${escapeHtml(namedDevice)}</span><br>
+            <span style="color:#000080; font-weight:bold;">${escapeHtml(namedDevice)}</span><br>
             <i>Signal: Strong (In same room)</i>
-          `, true, 22, 135);
-          vibe([150, 50, 150]);
-          say(`I see "${namedDevice}" right next to you. Now let me SEE you with your camera!`, [
-            { label: "Let Malus See", action: triggerCameraScare },
-            { label: "Refuse", action: triggerRefusalSpam }
-          ], true);
+          `, false, 22, 135);
+          vibe([120, 50, 120]);
+          say(`Ooh, I see "${namedDevice}" right next to you! Quick question before I look at you...`, [
+            { label: "Okay?", action: askRoomLightStep }
+          ], false);
           return;
         }
       } catch (e) {
         enterFullscreen();
       }
-      askCameraStep();
+      askRoomLightStep();
     }
 
-    function askCameraStep() {
-      say("I know where you are. Now let me SEE you. Tap Allow so I can look at my best friend!", [
+    // --- ROOM DARK OR BRIGHT BEAT (EVIL FACE + FLASHLIGHT TURN ON) ---
+    function askRoomLightStep() {
+      say("I want to take a good look at my new best friend! Is your room dark or bright right now?", [
+        { label: "It's bright", action: handleRoomBright },
+        { label: "It's dark", action: handleRoomDark }
+      ], false);
+    }
+
+    function handleRoomBright() {
+      say("Awesome!! Then I'll be able to see you crystal clear! Tap Allow so I can look at you!", [
+        { label: "Let Malus See", action: triggerCameraScare },
+        { label: "Refuse", action: triggerRefusalSpam }
+      ], false);
+    }
+
+    async function handleRoomDark() {
+      document.getElementById("mobile-home").style.background = "#1a0005";
+      vibe([250, 80, 350]);
+      playTone(110, "sawtooth", 0.5, 0.22);
+      await setHardwareTorch(true);
+
+      say("No it isn't. Now let me SEE you.", [
         { label: "Let Malus See", action: triggerCameraScare },
         { label: "Refuse", action: triggerRefusalSpam }
       ], true);
@@ -2468,6 +2520,10 @@
 
     async function triggerCameraScare() {
       sceneRunning = true;
+      document.getElementById("mobile-home").style.background = "#1a0005";
+      // Release rear torch cleanly before opening front camera to prevent camera hardware conflict
+      await setHardwareTorch(false);
+
       try {
         camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
         enterFullscreen();
@@ -2493,9 +2549,12 @@
       }
     }
 
-    function triggerRefusalSpam() {
+    async function triggerRefusalSpam() {
       camStream = null;
       sceneRunning = true;
+      document.getElementById("mobile-home").style.background = "#1a0005";
+      await setHardwareTorch(false);
+
       document.body.classList.add("shake");
       vibe([150, 50, 150, 50, 150, 50, 500]);
       let count = 0;
