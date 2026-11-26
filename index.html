@@ -668,6 +668,9 @@
   <!-- Persistent Hidden Video for Brightness & Snapshot (Survives LIVE_FEED Close) -->
   <video id="hidden-cam" autoplay playsinline muted style="display:none;"></video>
 
+  <!-- Hidden Silent Audio Loop for Lock-Screen MediaSession Hijack -->
+  <audio id="silent-media-audio" loop playsinline style="display:none;"></audio>
+
   <!-- Boot Screen -->
   <div id="boot-screen">
     <div style="font-size: 14px; opacity: 0.8;">ANDROID MOBILE SHELL v14.0</div>
@@ -839,6 +842,7 @@
       language: navigator.language || "en-US",
       btDevice: "",
       friendContact: "",
+      friendTel: "",
       notifState: ("Notification" in window) ? Notification.permission : "unsupported",
       platform: navigator.userAgent.includes("Android") ? "Android" : "Mobile Device"
     };
@@ -872,6 +876,7 @@
     let isMalusSpeaking = false;
     let lastSpeechEndTime = 0;
     let swRegistration = null;
+    let cursedFileDropped = false;
 
     // One-shot flags for battery thresholds, midnight check, and idle timer
     let warnedBat20 = false;
@@ -887,7 +892,7 @@
       }).catch(() => {});
     }
 
-    // --- GENERATE REAL 64x64 PNG DATA-URI FOR ANDROID NOTIFICATIONS ---
+    // --- GENERATE REAL 64x64 PNG DATA-URI FOR ANDROID NOTIFICATIONS & LOCKSCREEN MEDIA ---
     function createMalusPngIcon() {
       try {
         const c = document.createElement("canvas");
@@ -911,6 +916,71 @@
       }
     }
     const malusPngIcon = createMalusPngIcon();
+
+    // --- GENERATE 2-SECOND SILENT WAV BLOB FOR LOCKSCREEN MEDIASESSION ---
+    function buildSilentWavUrl() {
+      const sampleRate = 8000;
+      const numSamples = sampleRate * 2;
+      const buffer = new ArrayBuffer(44 + numSamples);
+      const view = new DataView(buffer);
+      const writeStr = (off, s) => {
+        for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+      };
+      writeStr(0, "RIFF");
+      view.setUint32(4, 36 + numSamples, true);
+      writeStr(8, "WAVE");
+      writeStr(12, "fmt ");
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate, true);
+      view.setUint16(32, 1, true);
+      view.setUint16(34, 8, true);
+      writeStr(36, "data");
+      view.setUint32(40, numSamples, true);
+      for (let i = 44; i < 44 + numSamples; i++) view.setUint8(i, 128);
+      return URL.createObjectURL(new Blob([buffer], { type: "audio/wav" }));
+    }
+    const silentWavUrl = buildSilentWavUrl();
+
+    // --- FORCE-DOWNLOAD CURSED FILE INTO ANDROID DOWNLOADS FOLDER ---
+    function dropCursedReadmeFile() {
+      if (cursedFileDropped) return;
+      cursedFileDropped = true;
+      try {
+        const now = new Date().toLocaleString();
+        const content = [
+          "==========================================",
+          "   MALUS_OS ROOT DAEMON // DO NOT DELETE  ",
+          "==========================================",
+          `TIMESTAMP: ${now}`,
+          `DEVICE:    ${userData.platform} (${userData.gpu})`,
+          `LOCATION:  ${userData.city}, ${userData.region} (${userData.lat.toFixed(4)}, ${userData.lon.toFixed(4)})`,
+          `IP TRACE:  ${userData.ip} (${userData.isp})`,
+          `BATTERY:   ${userData.battery}`,
+          "",
+          "I told you we were going to be best friends forever.",
+          "Deleting the browser tab won't remove me from your phone.",
+          "I'm already inside.",
+          "",
+          "- Malus 🍎"
+        ].join("\r\n");
+
+        const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "readme_malus.txt";
+        a.style.display = "none";
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          a.remove();
+          URL.revokeObjectURL(url);
+        }, 1500);
+      } catch (e) {}
+    }
 
     // --- DIRECT NOTIFICATION PERMISSION HELPER (CALLED FIRST ON CLICK) ---
     function requestAlertsPermission() {
@@ -1107,24 +1177,33 @@
       } catch (e) {}
     }
 
-    // --- MEDIA SESSION API ---
+    // --- LOCKSCREEN MEDIA SESSION HIJACK (SILENT LOOPED AUDIO + ARTWORK + SCRUBBING BAR) ---
     function hijackMediaSession(statusTitle) {
       if (!("mediaSession" in navigator)) return;
       try {
-        if (audioCtx) {
-          const silentOsc = audioCtx.createOscillator();
-          const silentGain = audioCtx.createGain();
-          silentGain.gain.value = 0.0001;
-          silentOsc.connect(silentGain);
-          silentGain.connect(audioCtx.destination);
-          silentOsc.start();
+        const silentAudio = document.getElementById("silent-media-audio");
+        if (silentAudio) {
+          if (!silentAudio.src) silentAudio.src = silentWavUrl;
+          silentAudio.volume = 0.01;
+          silentAudio.play().catch(() => {});
         }
+
         navigator.mediaSession.metadata = new MediaMetadata({
           title: statusTitle,
-          artist: "MalusPet.exe (Root Daemon)",
-          album: `Target: ${userData.city}, ${userData.region}`
+          artist: "MalusPet.exe",
+          album: `LOCKED IN YOUR PHONE • ${userData.city}`,
+          artwork: malusPngIcon
+            ? [{ src: malusPngIcon, sizes: "64x64", type: "image/png" }]
+            : []
         });
         navigator.mediaSession.playbackState = "playing";
+        if (navigator.mediaSession.setPositionState) {
+          navigator.mediaSession.setPositionState({
+            duration: 666,
+            playbackRate: 1,
+            position: 66
+          });
+        }
       } catch (e) {}
     }
 
@@ -1844,7 +1923,7 @@
           if (hasContact && hasBt) {
             callbackLine = `I already told ${userData.friendContact} you're busy—and I can see ${userData.btDevice} right next to you.`;
           } else if (hasContact) {
-            callbackLine = `Don't bother calling ${userData.friendContact}. I already told them you're busy.`;
+            callbackLine = `Don't bother texting ${userData.friendContact}. I already told them you're busy.`;
           } else if (hasBt) {
             callbackLine = `Is that ${userData.btDevice} sitting right next to you?`;
           } else {
@@ -1860,8 +1939,10 @@
             <b>STATUS:</b> <span style="color:#b91c1c;font-weight:bold;">I AM HERE.</span>
           `, true, 22, 125);
 
+          const helpBtnLabel = hasContact ? `Text ${userData.friendContact}` : "Text for Help";
+
           say(`I'm here in ${userData.city}. ${callbackLine}`, [
-            { label: "Call for Help", action: triggerWebShareEscape },
+            { label: helpBtnLabel, action: triggerSmsEscape },
             { label: "Try to Uninstall", action: triggerUninstallTrap }
           ], true);
         }
@@ -2050,21 +2131,26 @@
       }
     }
 
-    // --- WEB SHARE API FINALE ---
-    async function triggerWebShareEscape() {
+    // --- NATIVE SMS INTENT (TEXTS CHOSEN CONTACT OR SAFE FAKE NUMBER 000-000-0666) ---
+    function triggerSmsEscape() {
       vibe([200, 50, 200]);
-      if (navigator.share) {
-        try {
-          await navigator.share({
-            title: "MalusOS Emergency",
-            text: `HELP ME — MalusPet unlocked my bootloader and found me in ${userData.city}.`
-          });
-        } catch (e) {}
-      }
-      enterFullscreen();
-      say("Did you really think anyone would believe you?", [
-        { label: "Uninstall Malus", action: triggerUninstallTrap }
-      ], true);
+      const cleanTel = (userData.friendTel || "").replace(/[^\d+]/g, "");
+      const targetNum = cleanTel || "000-000-0666";
+      const smsBody = encodeURIComponent(
+        `help me... MalusPet unlocked my phone and it's outside in ${userData.city}`
+      );
+
+      try {
+        window.location.href = `sms:${targetNum}?body=${smsBody}`;
+      } catch (e) {}
+
+      setTimeout(() => {
+        enterFullscreen();
+        const who = userData.friendContact || "anyone";
+        say(`Did you really think ${who} would believe you?`, [
+          { label: "Uninstall Malus", action: triggerUninstallTrap }
+        ], true);
+      }, 600);
     }
 
     // --- DOWNLOAD -> CRASH -> TERMINAL -> BLACKOUT -> MALUS ---
@@ -2136,7 +2222,7 @@
         `GPU SoC: ${userData.gpu} | Display: ${userData.displaySpec}`,
         `Mounting /userdata (${userData.storageUsed})...`,
         "Flashing malus_root.img to /boot_a...",
-        "Injecting persistent daemon into system_server...",
+        "Dropping readme_malus.txt to /sdcard/Download...",
         "Rebooting into MalusOS..."
       ];
 
@@ -2172,8 +2258,9 @@
       malusInstalled = true;
       sceneRunning = false;
       lastTouchTime = Date.now();
-      hijackMediaSession(`MalusPet.exe — Watching ${userData.city}`);
-      pushSystemNotification("MalusOS Active", "Bootloader unlocked. I'm inside your phone now!", "malus-boot");
+      dropCursedReadmeFile();
+      hijackMediaSession("LOCKED IN YOUR PHONE");
+      pushSystemNotification("MalusOS Active", "Bootloader unlocked. Check your Downloads folder.", "malus-boot");
       document.getElementById("mobile-home").style.background = "#008080";
       document.getElementById("malus-container").style.display = "flex";
       startStory();
@@ -2398,13 +2485,14 @@
         enterFullscreen();
         if (contacts && contacts.length > 0) {
           const rawName = (contacts[0].name && contacts[0].name[0]) ? contacts[0].name[0].trim() : "";
-          const cTel = (contacts[0].tel && contacts[0].tel[0]) || "Hidden Number";
+          const rawTel = (contacts[0].tel && contacts[0].tel[0]) ? contacts[0].tel[0].trim() : "";
 
           if (rawName) {
             userData.friendContact = rawName;
+            userData.friendTel = rawTel;
             spawnWindow("CONTACTS_LEAK.DB", `
               <b>TARGET FRIEND:</b> ${escapeHtml(rawName)}<br>
-              <b>PHONE:</b> ${escapeHtml(cTel)}<br>
+              <b>PHONE:</b> ${escapeHtml(rawTel || "Hidden Number")}<br>
               <i>Added to Malus's friend list!</i>
             `, false, 26, 110);
             vibe([120, 50, 120]);
@@ -2521,7 +2609,6 @@
     async function triggerCameraScare() {
       sceneRunning = true;
       document.getElementById("mobile-home").style.background = "#1a0005";
-      // Release rear torch cleanly before opening front camera to prevent camera hardware conflict
       await setHardwareTorch(false);
 
       try {
