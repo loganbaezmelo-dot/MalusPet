@@ -141,6 +141,7 @@
       font-size: 26px;
       margin-bottom: 6px;
       box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+      position: relative;
     }
 
     .app-tile.browser-tile { background: #2563eb; }
@@ -149,6 +150,23 @@
     .app-tile.gal-tile { background: #7c3aed; }
     .app-tile.maps-tile { background: #dc2626; }
     .app-tile.uninst-tile { background: #111827; border-color: #ef4444; }
+    .app-tile.email-tile { background: #0284c7; }
+    .app-tile.lens-tile { background: #0d9488; }
+    .app-tile.files-tile { background: #ca8a04; }
+    .app-tile.chap-tile { background: #4f46e5; }
+    .app-tile.cmd-tile { background: #000000; border-color: #22c55e; }
+
+    .badge-dot {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      width: 14px;
+      height: 14px;
+      background: #ef4444;
+      border: 2px solid #fff;
+      border-radius: 50%;
+      display: none;
+    }
 
     /* Mobile Nav Bar */
     #nav-bar {
@@ -170,6 +188,82 @@
       font-size: 18px;
       padding: 8px 24px;
       cursor: pointer;
+    }
+
+    /* Draggable X-Ray Lens Overlay */
+    #lens-overlay {
+      position: fixed;
+      top: 90px;
+      left: 24px;
+      width: 156px;
+      height: 156px;
+      border: 4px solid #14b8a6;
+      border-radius: 22px;
+      background: rgba(13, 148, 136, 0.22);
+      box-shadow: 0 0 22px rgba(20, 184, 166, 0.55), inset 0 0 18px rgba(20, 184, 166, 0.45);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 7350;
+      touch-action: none;
+      cursor: grab;
+    }
+
+    #lens-overlay.locked-on {
+      border-color: #22c55e;
+      background: rgba(34, 197, 94, 0.28);
+      box-shadow: 0 0 26px rgba(34, 197, 94, 0.75);
+    }
+
+    #lens-header {
+      position: absolute;
+      top: 4px;
+      left: 8px;
+      right: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 10px;
+      font-weight: bold;
+      color: #ccfbf1;
+      text-shadow: 0 1px 2px #000;
+    }
+
+    #lens-close {
+      background: #0f172a;
+      color: #fff;
+      border: 1px solid #14b8a6;
+      border-radius: 4px;
+      padding: 0 5px;
+      font-size: 10px;
+      cursor: pointer;
+    }
+
+    #lens-status {
+      font-size: 10px;
+      font-weight: bold;
+      color: #ccfbf1;
+      text-shadow: 0 1px 2px #000;
+      text-align: center;
+      padding: 0 6px;
+    }
+
+    #lens-floppy-btn {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #0f172a;
+      border: 2px solid #22c55e;
+      border-radius: 10px;
+      padding: 8px 10px;
+      color: #4ade80;
+      font-size: 11px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 0 14px #22c55e;
+      animation: pulseDot 1s infinite;
     }
 
     /* Mobile Browser App */
@@ -343,7 +437,7 @@
 
     @keyframes pulseDot {
       0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.25); }
+      50% { transform: scale(1.22); }
     }
 
     /* Fake maluspet.com pages */
@@ -447,6 +541,24 @@
     .term-yellow { color: #ffdd44; font-weight: bold; }
     .term-green { color: #44ff66; font-weight: bold; }
 
+    /* Secret Bootloader Top-Left Lens Icon */
+    #boot-secret-lens {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      width: 30px;
+      height: 30px;
+      background: #0f172a;
+      border: 1px solid #14b8a6;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      cursor: pointer;
+      z-index: 7250;
+    }
+
     /* Pitch Black Cut */
     #blackout-screen {
       position: fixed;
@@ -456,10 +568,25 @@
       z-index: 7500;
     }
 
+    /* Ending Screen */
+    #ending-screen {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      color: #4ade80;
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 28px;
+      z-index: 9500;
+    }
+
     /* Retro Windows (Post-Takeover) */
     .window {
       position: absolute;
-      width: min(320px, 88vw);
+      width: min(325px, 90vw);
       background: var(--win-bg);
       border-top: 2px solid var(--win-light);
       border-left: 2px solid var(--win-light);
@@ -500,6 +627,29 @@
       font-size: 13px;
       line-height: 1.4;
       word-break: break-word;
+    }
+
+    .win-input {
+      width: 100%;
+      padding: 6px 8px;
+      margin: 4px 0 8px 0;
+      border: 2px inset #808080;
+      background: #fff;
+      color: #000;
+      font-size: 13px;
+      user-select: text;
+      -webkit-user-select: text;
+    }
+
+    .folder-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #e5e7eb;
+      border: 1px solid #808080;
+      padding: 6px 8px;
+      margin-bottom: 6px;
+      font-size: 12px;
     }
 
     /* Malus Character */
@@ -620,14 +770,14 @@
     }
 
     .btn {
-      padding: 8px 12px;
+      padding: 7px 11px;
       background: var(--win-bg);
       border-top: 2px solid var(--win-light);
       border-left: 2px solid var(--win-light);
       border-right: 2px solid #000;
       border-bottom: 2px solid #000;
       font-weight: bold;
-      font-size: 13px;
+      font-size: 12px;
       cursor: pointer;
     }
 
@@ -665,11 +815,24 @@
   <!-- Screen Flash Overlay -->
   <div id="screen-flash"></div>
 
-  <!-- Persistent Hidden Video for Brightness & Snapshot (Survives LIVE_FEED Close) -->
+  <!-- Persistent Hidden Video for Brightness & Snapshot -->
   <video id="hidden-cam" autoplay playsinline muted style="display:none;"></video>
 
   <!-- Hidden Audio Loop for Android Lock-Screen MediaSession Hijack -->
   <audio id="silent-media-audio" loop playsinline preload="auto" style="display:none;"></audio>
+
+  <!-- Draggable X-Ray Lens App Overlay -->
+  <div id="lens-overlay">
+    <div id="lens-header">
+      <span>LENS_SCAN v1.0</span>
+      <button id="lens-close" onclick="toggleLensApp(false)">X</button>
+    </div>
+    <div id="lens-status">NO SIGNAL</div>
+    <button id="lens-floppy-btn" onclick="collectCurrentFloppy()">
+      <span style="font-size:26px;">💾</span>
+      <span id="lens-floppy-label">FLOPPY_01</span>
+    </button>
+  </div>
 
   <!-- Boot Screen -->
   <div id="boot-screen">
@@ -698,6 +861,29 @@
       <div class="app-tile maps-tile">🗺️</div>
       <span>Maps</span>
     </div>
+    <div class="app-icon" onclick="openApp('email')">
+      <div class="app-tile email-tile">
+        📧
+        <div class="badge-dot" id="email-badge"></div>
+      </div>
+      <span>Email</span>
+    </div>
+    <div class="app-icon" onclick="toggleLensApp()">
+      <div class="app-tile lens-tile">🔍</div>
+      <span>Lens</span>
+    </div>
+    <div class="app-icon" onclick="openApp('files')">
+      <div class="app-tile files-tile">📁</div>
+      <span>Files</span>
+    </div>
+    <div class="app-icon" onclick="openApp('chapters')">
+      <div class="app-tile chap-tile">⏭️</div>
+      <span>Chapters</span>
+    </div>
+    <div class="app-icon" onclick="openApp('gallery')">
+      <div class="app-tile gal-tile">🖼️</div>
+      <span>Images</span>
+    </div>
     <div class="app-icon" onclick="openApp('notes')">
       <div class="app-tile notes-tile">📝</div>
       <span>Notes</span>
@@ -706,13 +892,13 @@
       <div class="app-tile sys-tile">⚙️</div>
       <span>Settings</span>
     </div>
-    <div class="app-icon" onclick="openApp('gallery')">
-      <div class="app-tile gal-tile">🖼️</div>
-      <span>Gallery</span>
-    </div>
     <div class="app-icon" id="uninstall-icon" style="display:none;" onclick="triggerUninstallTrap()">
       <div class="app-tile uninst-tile">🗑️</div>
       <span style="color:#fca5a5;">Uninstall</span>
+    </div>
+    <div class="app-icon" id="cmd-icon" style="display:none;" onclick="openApp('cmd')">
+      <div class="app-tile cmd-tile">⌨️</div>
+      <span style="color:#4ade80;">CMD</span>
     </div>
   </div>
 
@@ -774,7 +960,8 @@
 
   <!-- Fake Android Bootloader Terminal -->
   <div id="terminal-screen" onclick="advanceTerminal()">
-    <div class="term-red">ANDROID FASTBOOT / BOOTLOADER MENU v3.11</div>
+    <div id="boot-secret-lens" title="Lens" onclick="event.stopPropagation(); toggleLensApp();">🔍</div>
+    <div class="term-red" style="margin-top: 26px;">ANDROID FASTBOOT / BOOTLOADER MENU v3.11</div>
     <div>PRODUCT_NAME - MALUS_ARM64</div>
     <div>VARIANT - UFS 256GB</div>
     <div>SECURE BOOT - ENABLED</div>
@@ -790,6 +977,17 @@
 
   <!-- Pitch Black Cut -->
   <div id="blackout-screen"></div>
+
+  <!-- Final Ending Screen -->
+  <div id="ending-screen">
+    <div style="font-size: 48px; margin-bottom: 14px;">🍎</div>
+    <h1 style="margin: 0 0 10px 0; letter-spacing: 3px; color: #fff;">THE END</h1>
+    <p style="font-size: 13px; color: #4ade80; max-width: 300px; line-height: 1.5;">
+      MALUS_OS ROOT DAEMON TERMINATED.<br>
+      DEVICE CONTROL RESTORED.
+    </p>
+    <button class="btn" style="margin-top: 22px;" onclick="location.reload()">[ REBOOT SYSTEM ]</button>
+  </div>
 
   <!-- Malus Sprite -->
   <div id="malus-container">
@@ -855,6 +1053,35 @@
     ];
     const malusStartSpot = orlandoStreets[Math.floor(Math.random() * orlandoStreets.length)];
 
+    // --- SECRET ENDING / PUZZLE STATE ---
+    const DECRYPT_KEY = "MALUS-KEY-666";
+    const SECRET_SERVER = "malus-root-09.net";
+    const SECRET_USER = "malus_admin";
+    const SECRET_PASS = "orchard666";
+
+    const puzzleState = {
+      emailUnlocked: false,
+      currentScene: "ch1_website", // ch1_website | ch2_bootloader | ch3_darkmode | ch4_finale
+      browserLensToggleCount: 0,
+      lastToggledApp: "",
+      bootYPressed: false,
+      floppies: {
+        1: false, // Opening website (4 browser/lens cycles)
+        2: false, // Bootloader top-left lens + y
+        3: false, // Dark mode & location scene
+        4: false  // Final scene: drag Lens over Malus
+      },
+      decrypted: {
+        1: false,
+        2: false,
+        3: false
+      },
+      galleryAuthenticated: false,
+      cmdUnlocked: false,
+      malusDefeated: false,
+      activeFloppyId: null
+    };
+
     // Global state & guards
     let camStream = null;
     let activeTorchTrack = null;
@@ -890,6 +1117,208 @@
       navigator.serviceWorker.register("./sw.js").then((reg) => {
         swRegistration = reg;
       }).catch(() => {});
+    }
+
+    // --- LENS APP DRAG & FLOPPY DETECTION ---
+    (function initLensDrag() {
+      const lens = document.getElementById("lens-overlay");
+      let dragging = false, offX = 0, offY = 0;
+
+      const onStart = (cx, cy) => {
+        dragging = true;
+        offX = cx - lens.offsetLeft;
+        offY = cy - lens.offsetTop;
+      };
+      const onMove = (cx, cy) => {
+        if (!dragging) return;
+        lens.style.left = Math.max(0, Math.min(window.innerWidth - 156, cx - offX)) + "px";
+        lens.style.top = Math.max(28, Math.min(window.innerHeight - 204, cy - offY)) + "px";
+        updateLensScanner();
+      };
+      const onEnd = () => { dragging = false; };
+
+      lens.addEventListener("touchstart", (e) => {
+        if (e.target.tagName === "BUTTON") return;
+        onStart(e.touches[0].clientX, e.touches[0].clientY);
+      }, { passive: true });
+      window.addEventListener("touchmove", (e) => {
+        if (dragging) onMove(e.touches[0].clientX, e.touches[0].clientY);
+      }, { passive: true });
+      window.addEventListener("touchend", onEnd);
+
+      lens.addEventListener("mousedown", (e) => {
+        if (e.target.tagName === "BUTTON") return;
+        onStart(e.clientX, e.clientY);
+      });
+      window.addEventListener("mousemove", (e) => {
+        if (dragging) onMove(e.clientX, e.clientY);
+      });
+      window.addEventListener("mouseup", onEnd);
+    })();
+
+    function toggleLensApp(forceState) {
+      const lens = document.getElementById("lens-overlay");
+      const show = typeof forceState === "boolean" ? forceState : (lens.style.display !== "flex");
+
+      if (show) {
+        // Reset to default position whenever opened
+        lens.style.top = "90px";
+        lens.style.left = "24px";
+        lens.style.display = "flex";
+        playTone(680, "sine", 0.06, 0.08);
+
+        if (puzzleState.currentScene === "ch1_website" && puzzleState.lastToggledApp === "browser") {
+          puzzleState.browserLensToggleCount++;
+        }
+        puzzleState.lastToggledApp = "lens";
+        updateLensScanner();
+      } else {
+        lens.style.display = "none";
+        playTone(420, "sine", 0.05, 0.06);
+      }
+    }
+
+    function isLensOverMalus() {
+      const malusEl = document.getElementById("malus-container");
+      const lensEl = document.getElementById("lens-overlay");
+      if (!malusEl || malusEl.style.display === "none" || lensEl.style.display === "none") return false;
+      const r1 = lensEl.getBoundingClientRect();
+      const r2 = malusEl.getBoundingClientRect();
+      return !(r1.right < r2.left || r1.left > r2.right || r1.bottom < r2.top || r1.top > r2.bottom);
+    }
+
+    function updateLensScanner() {
+      const lens = document.getElementById("lens-overlay");
+      if (lens.style.display !== "flex") return;
+
+      const statusEl = document.getElementById("lens-status");
+      const btnEl = document.getElementById("lens-floppy-btn");
+      const lblEl = document.getElementById("lens-floppy-label");
+
+      let foundId = null;
+
+      // 1. Opening website scene: 4 cycles between Browser and Lens
+      if (
+        puzzleState.currentScene === "ch1_website" &&
+        !puzzleState.floppies[1] &&
+        puzzleState.browserLensToggleCount >= 4
+      ) {
+        foundId = 1;
+      }
+      // 2. Bootloader scene: secret top-left lens + typed 'y'
+      else if (
+        puzzleState.currentScene === "ch2_bootloader" &&
+        !puzzleState.floppies[2] &&
+        puzzleState.bootYPressed
+      ) {
+        foundId = 2;
+      }
+      // 3. Dark mode & location scene
+      else if (
+        puzzleState.currentScene === "ch3_darkmode" &&
+        !puzzleState.floppies[3]
+      ) {
+        foundId = 3;
+      }
+      // 4. Current/Final scene: drag Lens over Malus
+      else if (
+        puzzleState.currentScene === "ch4_finale" &&
+        !puzzleState.floppies[4] &&
+        isLensOverMalus()
+      ) {
+        foundId = 4;
+      }
+
+      puzzleState.activeFloppyId = foundId;
+
+      if (foundId) {
+        lens.classList.add("locked-on");
+        statusEl.style.display = "none";
+        btnEl.style.display = "flex";
+        lblEl.textContent = foundId === 4 ? "DECRYPT_DISK" : `FLOPPY_0${foundId}`;
+      } else {
+        lens.classList.remove("locked-on");
+        btnEl.style.display = "none";
+        statusEl.style.display = "block";
+        if (puzzleState.currentScene === "ch4_finale" && !puzzleState.floppies[4]) {
+          statusEl.textContent = "MOVE LENS OVER TARGET...";
+        } else if (puzzleState.currentScene === "ch1_website" && !puzzleState.floppies[1]) {
+          statusEl.textContent = `SCANNING... (${puzzleState.browserLensToggleCount}/4)`;
+        } else {
+          statusEl.textContent = "NO ANOMALY DETECTED";
+        }
+      }
+    }
+
+    function collectCurrentFloppy() {
+      const id = puzzleState.activeFloppyId;
+      if (!id) return;
+      puzzleState.floppies[id] = true;
+      puzzleState.activeFloppyId = null;
+      vibe([90, 40, 140]);
+      playTone(880, "square", 0.12, 0.1);
+      updateLensScanner();
+
+      const label = id === 4 ? "Decryption Key Floppy" : `Encrypted Floppy #${id}`;
+      spawnWindow("STORAGE_MOUNTED", `
+        <b>RECOVERED:</b> ${label}<br>
+        <i>Mounted inside Files app.</i>
+      `, false, 28, 95);
+    }
+
+    // --- CHAPTER SELECTOR ---
+    function jumpToChapter(ch) {
+      // Close overlays & reset transient scene visuals
+      document.getElementById("browser-app").style.display = "none";
+      document.getElementById("maps-app").style.display = "none";
+      document.getElementById("crash-screen").style.display = "none";
+      document.getElementById("terminal-screen").style.display = "none";
+      document.getElementById("blackout-screen").style.display = "none";
+      toggleLensApp(false);
+      setHardwareTorch(false);
+      mapHijackMode = false;
+      malusEnRoute = false;
+      sceneRunning = false;
+      clearInterval(typingTimer);
+
+      if (ch === 1) {
+        puzzleState.currentScene = "ch1_website";
+        puzzleState.browserLensToggleCount = 0;
+        puzzleState.lastToggledApp = "";
+        takeoverActive = false;
+        document.getElementById("malus-container").style.display = "none";
+        document.getElementById("speech-box").style.display = "none";
+        document.getElementById("mobile-home").style.background = "linear-gradient(160deg, #1e293b 0%, #0f172a 100%)";
+        openBrowser();
+      } else if (ch === 2) {
+        puzzleState.currentScene = "ch2_bootloader";
+        puzzleState.bootYPressed = false;
+        terminalTriggered = false;
+        document.getElementById("term-input").textContent = "_";
+        document.getElementById("term-input").className = "";
+        document.getElementById("term-logs").innerHTML = "";
+        document.getElementById("malus-container").style.display = "none";
+        document.getElementById("speech-box").style.display = "none";
+        document.getElementById("terminal-screen").style.display = "flex";
+      } else if (ch === 3) {
+        puzzleState.currentScene = "ch3_darkmode";
+        takeoverActive = true;
+        malusInstalled = true;
+        document.getElementById("mobile-home").style.background = "#008080";
+        document.getElementById("malus-container").style.display = "flex";
+        step2Friendly();
+      } else if (ch === 4) {
+        puzzleState.currentScene = "ch4_finale";
+        takeoverActive = true;
+        malusInstalled = true;
+        document.getElementById("mobile-home").style.background = "#1a0005";
+        document.getElementById("malus-container").style.display = "flex";
+        document.getElementById("uninstall-icon").style.display = "flex";
+        say("Shhh... don't breathe too loud. I can hear everything in your room.", [
+          { label: "Allow Mic", action: triggerMicRoomListen }
+        ], true);
+      }
+      updateLensScanner();
     }
 
     // --- GENERATE REAL 128x128 PNG DATA-URI + BLOB URL FOR ANDROID NOTIFICATIONS & LOCKSCREEN MEDIA ---
@@ -943,7 +1372,6 @@
       view.setUint16(34, 8, true);
       writeStr(36, "data");
       view.setUint32(40, numSamples, true);
-      // Tiny +/- 2 amplitude 30Hz wave so Android registers real audio output without audible noise
       for (let i = 0; i < numSamples; i++) {
         const sample = 128 + Math.round(Math.sin((2 * Math.PI * 30 * i) / sampleRate) * 2);
         view.setUint8(44 + i, sample);
@@ -952,7 +1380,6 @@
     }
     const silentWavUrl = buildSubAudibleWavUrl();
 
-    // --- PRIME AUDIO ELEMENT INSIDE DIRECT USER CLICK SO ANDROID UNLOCKS MEDIASESSION ---
     function primeLockscreenMediaAudio() {
       const audioEl = document.getElementById("silent-media-audio");
       if (!audioEl) return;
@@ -963,8 +1390,8 @@
       } catch (e) {}
     }
 
-    // --- LOCKSCREEN MEDIA SESSION HIJACK ---
     function hijackMediaSession(statusTitle) {
+      if (puzzleState.malusDefeated) return;
       const audioEl = document.getElementById("silent-media-audio");
       if (audioEl) {
         try {
@@ -990,11 +1417,11 @@
         });
         navigator.mediaSession.playbackState = "playing";
         navigator.mediaSession.setActionHandler("play", () => {
-          if (audioEl) audioEl.play().catch(() => {});
+          if (audioEl && !puzzleState.malusDefeated) audioEl.play().catch(() => {});
           navigator.mediaSession.playbackState = "playing";
         });
         navigator.mediaSession.setActionHandler("pause", () => {
-          // Refuse to stay paused on the lockscreen
+          if (puzzleState.malusDefeated) return;
           if (audioEl) audioEl.play().catch(() => {});
           navigator.mediaSession.playbackState = "playing";
           vibe([120, 60, 120]);
@@ -1047,7 +1474,7 @@
       } catch (e) {}
     }
 
-    // --- DIRECT NOTIFICATION PERMISSION HELPER (CALLED FIRST ON CLICK) ---
+    // --- DIRECT NOTIFICATION PERMISSION HELPER ---
     function requestAlertsPermission() {
       if (!("Notification" in window)) {
         userData.notifState = "unsupported";
@@ -1069,7 +1496,7 @@
       return Promise.resolve(Notification.permission);
     }
 
-    // --- WEBGL GPU FINGERPRINT (PRESERVES INNER PARENTHESES) ---
+    // --- WEBGL GPU FINGERPRINT ---
     function grabGpuFingerprint() {
       try {
         const canvas = document.createElement("canvas");
@@ -1105,14 +1532,14 @@
       if (window.matchMedia) {
         window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
           userData.colorScheme = e.matches ? "Dark Mode" : "Light Mode";
-          if (takeoverActive) {
+          if (takeoverActive && !puzzleState.malusDefeated) {
             speakAloud(e.matches ? "Turning on dark mode won't hide you." : "Turning on light mode won't save you.", isEvilState);
           }
         });
       }
     }
 
-    // --- PERSISTENT REAR TORCH ON/OFF (FOR "NO IT ISN'T" DARK ROOM REVEAL) ---
+    // --- PERSISTENT REAR TORCH ON/OFF ---
     async function setHardwareTorch(on) {
       try {
         if (on) {
@@ -1143,8 +1570,9 @@
       }
     }
 
-    // --- HARDWARE REAR TORCH SLOW BLINK (SAFE < 1 FLASH/SEC + CLEAN TRACK STOP) ---
+    // --- HARDWARE REAR TORCH SLOW BLINK ---
     async function pulseHardwareTorch(blinks = 2) {
+      if (puzzleState.malusDefeated) return;
       await setHardwareTorch(false);
       let tempTorchTrack = null;
       try {
@@ -1159,13 +1587,13 @@
         }
 
         for (let i = 0; i < blinks; i++) {
+          if (puzzleState.malusDefeated) break;
           await tempTorchTrack.applyConstraints({ advanced: [{ torch: true }] });
           await new Promise(r => setTimeout(r, 450));
           await tempTorchTrack.applyConstraints({ advanced: [{ torch: false }] });
           await new Promise(r => setTimeout(r, 600));
         }
       } catch (e) {
-        // Fail quietly if unsupported
       } finally {
         if (tempTorchTrack) {
           try { tempTorchTrack.stop(); } catch (e) {}
@@ -1250,7 +1678,7 @@
         }
         if (screen.orientation) {
           screen.orientation.addEventListener("change", () => {
-            if (!takeoverActive) return;
+            if (!takeoverActive || puzzleState.malusDefeated) return;
             if (screen.orientation.type.includes("landscape")) {
               vibe([180, 60, 180]);
               speakAloud("Don't flip your screen sideways. Keep looking at me.", isEvilState);
@@ -1272,7 +1700,7 @@
     const originalTitle = document.title;
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") {
-        if (takeoverActive) {
+        if (takeoverActive && !puzzleState.malusDefeated) {
           document.title = "I SEE YOU";
           hijackMediaSession("LOCKED IN YOUR PHONE");
           pushSystemNotification("WHERE ARE YOU GOING?", "Switching apps won't get rid of me. Come back.", "malus-escape");
@@ -1281,7 +1709,7 @@
         document.title = originalTitle;
         lastTouchTime = Date.now();
         if (shouldStayFullscreen) requestScreenWakeLock();
-        if (takeoverActive && Date.now() - lastEscapeScold > 7000) {
+        if (takeoverActive && !puzzleState.malusDefeated && Date.now() - lastEscapeScold > 7000) {
           lastEscapeScold = Date.now();
           vibe([220, 60, 220]);
           spawnWindow("APP_SWITCH_INTERCEPT", "<b>NICE TRY.</b><br>You can't minimize MalusOS.", true, 26, 70);
@@ -1290,12 +1718,12 @@
       }
     });
 
-    // --- 30-SECOND IDLE TIMER (NON-DESTRUCTIVE INTERJECT, PAUSED DURING SPEECH / SCENES) ---
+    // --- 30-SECOND IDLE TIMER ---
     document.addEventListener("touchstart", () => { lastTouchTime = Date.now(); }, { passive: true });
     document.addEventListener("pointerdown", () => { lastTouchTime = Date.now(); }, { passive: true });
 
     setInterval(() => {
-      if (!takeoverActive) return;
+      if (!takeoverActive || puzzleState.malusDefeated) return;
       const busy = sceneRunning ||
         malusEnRoute ||
         isTypingDialogue ||
@@ -1317,7 +1745,7 @@
 
     // --- GAMEPAD API DETECTION ---
     window.addEventListener("gamepadconnected", (e) => {
-      if (!takeoverActive) return;
+      if (!takeoverActive || puzzleState.malusDefeated) return;
       const padName = escapeHtml(e.gamepad.id.split("(")[0].trim() || "Controller");
       vibe([200, 80, 200]);
       spawnWindow("HID_INPUT_DETECTED", `<b>EXTERNAL CONTROLLER:</b><br>${padName}<br><br><i>Buttons won't save you.</i>`, true, 24, 90);
@@ -1345,9 +1773,9 @@
           isMalusSpeaking = false;
           lastSpeechEndTime = Date.now();
           lastTouchTime = Date.now();
-          if (activeSpeechRec && micListeningActive) {
+          if (activeSpeechRec && micListeningActive && !puzzleState.malusDefeated) {
             setTimeout(() => {
-              if (!isMalusSpeaking && activeSpeechRec && micListeningActive) {
+              if (!isMalusSpeaking && activeSpeechRec && micListeningActive && !puzzleState.malusDefeated) {
                 try { activeSpeechRec.start(); } catch (e) {}
               }
             }, 950);
@@ -1366,7 +1794,7 @@
     // --- DEVICE ORIENTATION & MOTION SENSORS ---
     function initHardwareSensors() {
       window.addEventListener("deviceorientation", (e) => {
-        if (!takeoverActive) return;
+        if (!takeoverActive || puzzleState.malusDefeated) return;
         const gamma = Math.max(-30, Math.min(30, e.gamma || 0));
         const beta = Math.max(-30, Math.min(30, (e.beta || 45) - 45));
         const px = (gamma / 30) * 4;
@@ -1384,7 +1812,7 @@
       });
 
       window.addEventListener("devicemotion", (e) => {
-        if (!takeoverActive || !e.accelerationIncludingGravity) return;
+        if (!takeoverActive || puzzleState.malusDefeated || !e.accelerationIncludingGravity) return;
         const { x, y, z } = e.accelerationIncludingGravity;
         const force = Math.sqrt((x || 0) ** 2 + (y || 0) ** 2 + (z || 0) ** 2);
         if (force > 26 && Date.now() - lastSensorScold > 8000) {
@@ -1397,7 +1825,7 @@
       });
     }
 
-    // --- REAL ANDROID SYSTEM NOTIFICATIONS VIA SW.JS (PNG ICON) ---
+    // --- REAL ANDROID SYSTEM NOTIFICATIONS VIA SW.JS ---
     async function pushSystemNotification(title, body, tag = "malus-alert") {
       if (!("Notification" in window)) return;
       userData.notifState = Notification.permission;
@@ -1477,7 +1905,7 @@
     }, 1000);
 
     function checkBatteryThresholds(levelFloat, isCharging) {
-      if (!takeoverActive || isCharging) return;
+      if (!takeoverActive || isCharging || puzzleState.malusDefeated) return;
       const pct = Math.round(levelFloat * 100);
       if (pct <= 10 && !warnedBat10) {
         warnedBat10 = true;
@@ -1493,7 +1921,7 @@
       }
     }
 
-    // Multi-provider IP lookup (avoids ipapi.co rate limits)
+    // Multi-provider IP lookup
     async function fetchReliableIpGeo() {
       try {
         const res = await fetch("https://ipwho.is/");
@@ -1530,7 +1958,6 @@
       } catch (e) {}
     }
 
-    // Optional Exact Android GPS + Reverse Geocoding via Nominatim
     function requestExactGpsLocation() {
       return new Promise((resolve) => {
         if (!("geolocation" in navigator)) {
@@ -1587,7 +2014,7 @@
           bat.addEventListener("levelchange", updateBat);
           bat.addEventListener("chargingchange", () => {
             updateBat();
-            if (!takeoverActive) return;
+            if (!takeoverActive || puzzleState.malusDefeated) return;
             vibe([160, 50, 160]);
             const msg = bat.charging
               ? "Plugging your charger in won't give you enough time to escape."
@@ -1619,6 +2046,12 @@
 
     // --- MOBILE NAVIGATION & BROWSER ---
     function openBrowser() {
+      if (puzzleState.currentScene === "ch1_website" && puzzleState.lastToggledApp === "lens") {
+        puzzleState.browserLensToggleCount++;
+      }
+      puzzleState.lastToggledApp = "browser";
+      toggleLensApp(false);
+
       document.getElementById("maps-app").style.display = "none";
       document.getElementById("browser-app").style.display = "flex";
       loadUrl("https://maluspet.com");
@@ -1641,7 +2074,7 @@
         playTone(380, "sine", 0.05);
         return;
       }
-      if (takeoverActive) {
+      if (takeoverActive && !puzzleState.malusDefeated) {
         vibe([80, 40, 80]);
         playTone(120, "sawtooth", 0.15);
       }
@@ -1985,11 +2418,22 @@
       }, 145);
     }
 
-    // --- FAKE UNINSTALL TRAP -> FAKE CAMERA FLASH + REAR TORCH BLINK + AMBIENT MIC ---
+    // --- UNLOCK SECRET EMAIL WHEN FLASHLIGHT + MIC SCENE TRIGGERS ---
+    function unlockSecretHelpEmail() {
+      if (puzzleState.emailUnlocked) return;
+      puzzleState.emailUnlocked = true;
+      puzzleState.currentScene = "ch4_finale";
+      const badge = document.getElementById("email-badge");
+      if (badge) badge.style.display = "block";
+      pushSystemNotification("New Email: sysadmin@malus-trace.local", "HOW TO STOP MALUS — Read immediately.", "malus-help-email");
+    }
+
+    // --- FAKE UNINSTALL TRAP -> FLASHLIGHT + MIC + UNLOCK SECRET EMAIL ---
     let uninstallTriggered = false;
     function triggerUninstallTrap() {
       document.getElementById("maps-app").style.display = "none";
       document.getElementById("browser-app").style.display = "none";
+      puzzleState.currentScene = "ch4_finale";
 
       if (uninstallTriggered) {
         if (!micListeningActive) {
@@ -2026,6 +2470,7 @@
 
             triggerFakeCameraFlash();
             pulseHardwareTorch(2);
+            unlockSecretHelpEmail();
 
             setTimeout(() => {
               document.body.classList.remove("shake");
@@ -2041,6 +2486,7 @@
     }
 
     async function triggerMicRoomListen() {
+      unlockSecretHelpEmail();
       if (micListeningActive) return;
       micListeningActive = true;
 
@@ -2082,6 +2528,7 @@
             rec.continuous = true;
             rec.interimResults = false;
             rec.onresult = (ev) => {
+              if (puzzleState.malusDefeated) return;
               const malusTalking = isMalusSpeaking ||
                 (("speechSynthesis" in window) && window.speechSynthesis.speaking) ||
                 (Date.now() - lastSpeechEndTime < 1200);
@@ -2099,9 +2546,9 @@
               }
             };
             rec.onend = () => {
-              if (micListeningActive && !isMalusSpeaking && activeSpeechRec === rec) {
+              if (micListeningActive && !isMalusSpeaking && !puzzleState.malusDefeated && activeSpeechRec === rec) {
                 setTimeout(() => {
-                  if (micListeningActive && !isMalusSpeaking && activeSpeechRec === rec) {
+                  if (micListeningActive && !isMalusSpeaking && !puzzleState.malusDefeated && activeSpeechRec === rec) {
                     try { rec.start(); } catch (e) {}
                   }
                 }, 400);
@@ -2115,7 +2562,7 @@
         say("Shhh... don't breathe too loud. I can hear everything in your room.", [], true);
 
         function drawWave() {
-          if (!document.body.contains(canvas)) return;
+          if (!document.body.contains(canvas) || puzzleState.malusDefeated) return;
           requestAnimationFrame(drawWave);
           analyser.getByteTimeDomainData(dataArray);
 
@@ -2167,7 +2614,7 @@
       }
     }
 
-    // --- NATIVE SMS INTENT (TEXTS CHOSEN CONTACT OR SAFE FAKE NUMBER 000-000-0666) ---
+    // --- NATIVE SMS INTENT ---
     function triggerSmsEscape() {
       vibe([200, 50, 200]);
       const cleanTel = (userData.friendTel || "").replace(/[^\d+]/g, "");
@@ -2237,7 +2684,9 @@
       setTimeout(() => {
         document.body.classList.remove("shake");
         document.getElementById("crash-screen").style.display = "none";
+        puzzleState.currentScene = "ch2_bootloader";
         document.getElementById("terminal-screen").style.display = "flex";
+        updateLensScanner();
       }, 2800);
     }
 
@@ -2246,6 +2695,9 @@
       vibe([70]);
       playTone(520, "square", 0.05, 0.08);
       primeLockscreenMediaAudio();
+
+      puzzleState.bootYPressed = true;
+      updateLensScanner();
 
       if (terminalTriggered) return;
       terminalTriggered = true;
@@ -2276,6 +2728,7 @@
         } else {
           clearInterval(logTimer);
           setTimeout(() => {
+            toggleLensApp(false);
             document.getElementById("terminal-screen").style.display = "none";
             document.getElementById("blackout-screen").style.display = "block";
             vibe([250]);
@@ -2303,7 +2756,7 @@
       startStory();
     }
 
-    // --- WINDOW SPAWNER & DRAG (CLEANUP LISTENERS ON RELEASE/CLOSE) ---
+    // --- WINDOW SPAWNER & DRAG ---
     let zIndexCounter = 650;
     function spawnWindow(title, htmlContent, evil = false, x = 20, y = 45, onClose = null) {
       zIndexCounter++;
@@ -2382,8 +2835,53 @@
       return win;
     }
 
+    // --- APPS: EMAIL, FILES (BASE64 DECRYPTION), CHAPTERS, IMAGES, CMD ---
     function openApp(app) {
-      if (app === "notes") {
+      if (app === "email") {
+        document.getElementById("email-badge").style.display = "none";
+        if (!puzzleState.emailUnlocked) {
+          spawnWindow("Inbox (0 Messages)", `
+            <div style="text-align:center; padding:16px 4px; color:#475569;">
+              <b>No emails in inbox.</b><br>
+              <span style="font-size:11px;">All caught up.</span>
+            </div>
+          `, false, 22, 65);
+        } else {
+          spawnWindow("Inbox (1 NEW) — HOW TO STOP MALUS", `
+            <div style="font-size:11px; color:#b91c1c; font-weight:bold; margin-bottom:6px;">
+              FROM: sysadmin@malus-trace.local<br>
+              SUBJECT: URGENT — KILLSWITCH PROTOCOL
+            </div>
+            <div style="max-height:220px; overflow-y:auto; background:#fff; border:1px inset #808080; padding:8px; font-size:12px;">
+              Use <b>Chapter Select</b> to recover the 4 hidden floppy disks using the <b>Lens</b> app:<br><br>
+              <b>1.</b> Go to the opening <b>MalusPet Website</b> chapter. Alternate opening & closing <b>Browser</b> and <b>Lens</b> 4 times until <b>Floppy 1</b> appears in Lens, then tap it.<br><br>
+              <b>2.</b> Go to the <b>Bootloader</b> chapter. Tap the secret <b>🔍</b> icon in the top-left corner, press <b>y</b>, and collect <b>Floppy 2</b>.<br><br>
+              <b>3.</b> Go to the <b>Dark Mode & Location</b> chapter and open <b>Lens</b> to collect <b>Floppy 3</b>.<br><br>
+              <b>4.</b> Return to the <b>Mic & Flashlight</b> chapter, open <b>Lens</b>, and drag it directly over <b>Malus</b> to get the <b>Decryption Key Floppy</b>.<br><br>
+              Open <b>Files</b> to decrypt all 3 disks, enter the Server, Username & Password in <b>Images</b>, open the fake image, and type <b>disableall</b> in CMD.
+            </div>
+          `, true, 16, 48);
+        }
+      } else if (app === "chapters") {
+        spawnWindow("Chapter Select", `
+          <div style="font-size:12px; margin-bottom:8px;">
+            <b>Floppies Recovered:</b>
+            ${[1, 2, 3, 4].map(n => puzzleState.floppies[n] ? `💾#${n}` : `⬜#${n}`).join(" ")}
+          </div>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <button class="btn" onclick="this.closest('.window').remove(); jumpToChapter(1);">1. MalusPet Website</button>
+            <button class="btn" onclick="this.closest('.window').remove(); jumpToChapter(2);">2. Bootloader Terminal</button>
+            <button class="btn" onclick="this.closest('.window').remove(); jumpToChapter(3);">3. Dark Mode & Location</button>
+            <button class="btn" onclick="this.closest('.window').remove(); jumpToChapter(4);">4. Mic & Flashlight</button>
+          </div>
+        `, false, 24, 65);
+      } else if (app === "files") {
+        renderFilesWindow();
+      } else if (app === "gallery") {
+        renderImagesWindow();
+      } else if (app === "cmd") {
+        renderCmdWindow();
+      } else if (app === "notes") {
         spawnWindow("passwords.txt", `
           <b>Saved Logins:</b><br>
           - Google: •••••••••••<br>
@@ -2406,15 +2904,207 @@
           <b>IP:</b> ${escapeHtml(userData.ip)}<br>
           <b>Location:</b> ${escapeHtml(userData.city)}, ${escapeHtml(userData.region)} (${escapeHtml(userData.locAccuracy)})
         `, false, 30, 95);
-      } else if (app === "gallery") {
-        spawnWindow("Access Denied", `
-          <span style="color:#900; font-weight:bold;">MalusPet has locked DCIM_Private.</span>
-        `, true, 40, 125);
-        vibe([80, 50, 80]);
       }
     }
 
-    // --- DIALOGUE ENGINE (TEXT + REAL VOICE TTS + NON-DESTRUCTIVE INTERJECT) ---
+    function renderFilesWindow() {
+      const b64Samples = {
+        1: btoa("SERVER=" + SECRET_SERVER),
+        2: btoa("USER=" + SECRET_USER),
+        3: btoa("PASS=" + SECRET_PASS)
+      };
+      const labels = {
+        1: `Malus Server Name: <b>${escapeHtml(SECRET_SERVER)}</b>`,
+        2: `Malus Username: <b>${escapeHtml(SECRET_USER)}</b>`,
+        3: `Malus Password: <b>${escapeHtml(SECRET_PASS)}</b>`
+      };
+
+      const rowsHtml = [1, 2, 3].map(n => {
+        if (!puzzleState.floppies[n]) {
+          return `<div class="folder-row"><span>🔒 enc_disk_0${n}.b64</span><span style="color:#64748b;">MISSING</span></div>`;
+        }
+        if (puzzleState.decrypted[n]) {
+          return `<div class="folder-row" style="background:#dcfce7;"><span>🔓 ${labels[n]}</span></div>`;
+        }
+        return `
+          <div class="folder-row">
+            <div>
+              <b>📁 enc_disk_0${n}.b64</b><br>
+              <span style="font-size:10px; color:#475569;">${b64Samples[n].slice(0, 18)}...</span>
+            </div>
+            <button class="btn" onclick="this.closest('.window').remove(); promptDecryptDisk(${n});">OPEN</button>
+          </div>
+        `;
+      }).join("");
+
+      const keyFolderHtml = puzzleState.floppies[4]
+        ? `<div class="folder-row" style="background:#fef9c3;"><span>🔑 <b>DECRYPTION_KEY:</b> ${DECRYPT_KEY}</span></div>`
+        : `<div class="folder-row"><span>🔒 DECRYPTION_KEY</span><span style="color:#64748b;">LOCKED</span></div>`;
+
+      spawnWindow("Files — /sdcard/Malus_Vault", `
+        ${keyFolderHtml}
+        ${rowsHtml}
+      `, false, 18, 55);
+    }
+
+    function promptDecryptDisk(diskNum) {
+      const win = spawnWindow(`Decrypt enc_disk_0${diskNum}.b64`, `
+        <div style="font-size:12px;">Enter decryption key from DECRYPTION_KEY folder:</div>
+        <input class="win-input" id="decrypt-key-input" type="text" placeholder="e.g. MALUS-KEY-..." autocomplete="off" />
+        <div id="decrypt-err" style="color:#b91c1c; font-size:11px; font-weight:bold; min-height:14px;"></div>
+        <button class="btn" id="decrypt-ok-btn">OK</button>
+      `, false, 24, 90);
+
+      win.querySelector("#decrypt-ok-btn").onclick = () => {
+        const val = win.querySelector("#decrypt-key-input").value.trim().toUpperCase();
+        if (val === DECRYPT_KEY) {
+          puzzleState.decrypted[diskNum] = true;
+          vibe([60, 40, 100]);
+          playTone(760, "sine", 0.1, 0.08);
+          win.remove();
+          renderFilesWindow();
+        } else {
+          vibe([120]);
+          playTone(130, "sawtooth", 0.15, 0.1);
+          win.querySelector("#decrypt-err").textContent = "INVALID DECRYPTION KEY.";
+        }
+      };
+    }
+
+    function renderImagesWindow() {
+      const allDecrypted = puzzleState.decrypted[1] && puzzleState.decrypted[2] && puzzleState.decrypted[3];
+      if (!allDecrypted) {
+        spawnWindow("Access Denied", `
+          <span style="color:#900; font-weight:bold;">MalusPet has locked DCIM_Private.</span><br>
+          <span style="font-size:11px;">Remote server credentials required to override lock.</span>
+        `, true, 32, 110);
+        vibe([80, 50, 80]);
+        return;
+      }
+
+      if (!puzzleState.galleryAuthenticated) {
+        const win = spawnWindow("Images — Remote Server Override", `
+          <div style="color:#900; font-weight:bold; margin-bottom:6px;">DCIM_Private Still Locked — Enter Malus Credentials:</div>
+          <label style="font-size:11px;">Malus Server Name:</label>
+          <input class="win-input" id="srv-in" type="text" autocomplete="off" />
+          <label style="font-size:11px;">Malus Username:</label>
+          <input class="win-input" id="usr-in" type="text" autocomplete="off" />
+          <label style="font-size:11px;">Malus Password:</label>
+          <input class="win-input" id="pwd-in" type="text" autocomplete="off" />
+          <div id="gal-auth-err" style="color:#b91c1c; font-size:11px; font-weight:bold; min-height:14px;"></div>
+          <button class="btn" id="gal-auth-btn">UNLOCK IMAGES</button>
+        `, true, 18, 52);
+
+        win.querySelector("#gal-auth-btn").onclick = () => {
+          const s = win.querySelector("#srv-in").value.trim().toLowerCase();
+          const u = win.querySelector("#usr-in").value.trim().toLowerCase();
+          const p = win.querySelector("#pwd-in").value.trim().toLowerCase();
+          if (s === SECRET_SERVER && u === SECRET_USER && p === SECRET_PASS) {
+            puzzleState.galleryAuthenticated = true;
+            vibe([80, 40, 120]);
+            playTone(820, "sine", 0.12, 0.08);
+            win.remove();
+            renderImagesWindow();
+          } else {
+            vibe([140]);
+            playTone(120, "sawtooth", 0.15, 0.1);
+            win.querySelector("#gal-auth-err").textContent = "AUTHENTICATION FAILED.";
+          }
+        };
+        return;
+      }
+
+      // Authenticated -> show fake image that reveals the previously invisible CMD app
+      const win = spawnWindow("Images — DCIM_Private (1 File)", `
+        <div style="background:#000; border:2px inset #808080; padding:12px; text-align:center; color:#4ade80; cursor:pointer;" id="fake-img-tile">
+          <div style="font-size:36px;">🖼️⚠️</div>
+          <div style="font-weight:bold; font-size:12px; margin-top:4px;">malus_core_payload.png</div>
+          <div style="font-size:10px; color:#f87171; margin-top:4px;">[ Tap image to inspect payload ]</div>
+        </div>
+      `, false, 24, 80);
+
+      win.querySelector("#fake-img-tile").onclick = () => {
+        puzzleState.cmdUnlocked = true;
+        document.getElementById("cmd-icon").style.display = "flex";
+        vibe([100, 50, 150]);
+        playTone(640, "square", 0.1, 0.08);
+        win.remove();
+        openApp("cmd");
+      };
+    }
+
+    function renderCmdWindow() {
+      const win = spawnWindow("CMD — root@malus-arm64:~#", `
+        <div style="background:#000; color:#4ade80; padding:8px; font-size:12px; border:2px inset #808080;">
+          MalusOS Root Shell v3.11<br>
+          Type command to terminate daemon:
+          <div style="display:flex; align-items:center; gap:4px; margin-top:8px;">
+            <span>&gt;</span>
+            <input id="cmd-input" type="text" autocomplete="off" style="flex:1; background:#000; color:#4ade80; border:1px solid #22c55e; padding:4px 6px; font-size:13px; user-select:text; -webkit-user-select:text;" />
+            <button class="btn" id="cmd-run-btn" style="padding:4px 8px;">RUN</button>
+          </div>
+          <div id="cmd-out" style="color:#f87171; margin-top:6px; font-size:11px;"></div>
+        </div>
+      `, true, 18, 75);
+
+      const execCmd = () => {
+        const cmd = win.querySelector("#cmd-input").value.trim().toLowerCase();
+        if (cmd === "disableall") {
+          win.remove();
+          triggerMalusDefeatEnding();
+        } else {
+          win.querySelector("#cmd-out").textContent = `Unknown command: "${escapeHtml(cmd)}"`;
+        }
+      };
+
+      win.querySelector("#cmd-run-btn").onclick = execCmd;
+      win.querySelector("#cmd-input").onkeydown = (e) => {
+        if (e.key === "Enter") execCmd();
+      };
+      setTimeout(() => win.querySelector("#cmd-input").focus(), 100);
+    }
+
+    // --- FINAL ENDING: MALUS SCREAMS "NOOOO!", DISAPPEARS, THE END ---
+    async function triggerMalusDefeatEnding() {
+      if (puzzleState.malusDefeated) return;
+      puzzleState.malusDefeated = true;
+      takeoverActive = false;
+      sceneRunning = true;
+      toggleLensApp(false);
+      await setHardwareTorch(false);
+
+      // Stop lockscreen media audio & speech recognition
+      const audioEl = document.getElementById("silent-media-audio");
+      if (audioEl) {
+        try { audioEl.pause(); } catch (e) {}
+      }
+      if ("mediaSession" in navigator) {
+        try { navigator.mediaSession.playbackState = "none"; } catch (e) {}
+      }
+      if (activeSpeechRec) {
+        try { activeSpeechRec.abort(); } catch (e) {}
+        activeSpeechRec = null;
+      }
+
+      document.body.classList.add("shake");
+      vibe([400, 80, 400, 80, 700]);
+      playTone(75, "sawtooth", 1.2, 0.25);
+
+      say("NOOOO!", [], true);
+
+      setTimeout(() => {
+        document.body.classList.remove("shake");
+        document.getElementById("malus-container").style.display = "none";
+        document.getElementById("speech-box").style.display = "none";
+        document.getElementById("mobile-home").style.background = "linear-gradient(160deg, #1e293b 0%, #0f172a 100%)";
+
+        setTimeout(() => {
+          document.getElementById("ending-screen").style.display = "flex";
+        }, 1200);
+      }, 2200);
+    }
+
+    // --- DIALOGUE ENGINE ---
     let typingTimer;
     function say(text, choices = [], evil = false) {
       clearInterval(typingTimer);
@@ -2457,11 +3147,13 @@
     }
 
     function interject(text) {
+      if (puzzleState.malusDefeated) return;
       say(text, currentChoices, isEvilState);
     }
 
-    // --- STORY / SCARE SCRIPT (FRIENDLY UNTIL LIGHT CHECK / CAMERA TURN) ---
+    // --- STORY / SCARE SCRIPT ---
     function startStory() {
+      puzzleState.currentScene = "ch3_darkmode";
       let lateNightLine = "";
       if (!checkedLateNight) {
         checkedLateNight = true;
@@ -2480,6 +3172,8 @@
     }
 
     function step2Friendly() {
+      puzzleState.currentScene = "ch3_darkmode";
+      updateLensScanner();
       const darkComment = userData.colorScheme === "Dark Mode"
         ? `Even with ${userData.colorScheme} turned on in ${userData.city}...`
         : `Especially sitting here with you in ${userData.city}...`;
@@ -2489,8 +3183,10 @@
     }
 
     function step2Suspicious() {
+      puzzleState.currentScene = "ch3_darkmode";
+      updateLensScanner();
       vibe([100, 50, 100]);
-      say(`Aww, don't be shy! I just configured your ${userData.platform}—and I see you're at ${userData.battery} battery on ${userData.netType}!`, [
+      say(`Aww, don't be shy! I just configured your ${userData.platform}—and I see you're in ${userData.city} using ${userData.colorScheme} at ${userData.battery} battery!`, [
         { label: "Creepy...", action: step3Reveal }
       ], false);
     }
@@ -2616,7 +3312,7 @@
       askRoomLightStep();
     }
 
-    // --- ROOM DARK OR BRIGHT BEAT (EVIL FACE + FLASHLIGHT TURN ON) ---
+    // --- ROOM DARK OR BRIGHT BEAT ---
     function askRoomLightStep() {
       say("I want to take a good look at my new best friend! Is your room dark or bright right now?", [
         { label: "It's bright", action: handleRoomBright },
